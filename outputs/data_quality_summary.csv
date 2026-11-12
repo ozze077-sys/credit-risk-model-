@@ -1,0 +1,56 @@
+Section,Item,Value
+Overall,File,credit_risk_test_data traning 2.xlsx + default of credit card clients.xls
+Overall,Source files,2
+Overall,Real header found on Excel row,1 / 2
+Overall,Original target column name,default.payment.next.month / default payment next month
+Overall,Rows read,30120
+Overall,Rows used (valid target),30120
+Overall,Columns used,25
+Overall,Total missing values,0
+Overall,Fully duplicated rows,0
+Overall,Rows identical except ID,35
+Overall,Duplicate customer IDs,0
+Overall,Missing customer IDs,0
+Source file,credit_risk_test_data traning 2.xlsx,customers=120; defaults=37; default rate=30.8%
+Source file,default of credit card clients.xls,customers=30000; defaults=6636; default rate=22.1%
+Column,ID,type=int64; missing=0 (0.0%); unique=30120
+Column,LIMIT_BAL,type=int64; missing=0 (0.0%); unique=81
+Column,AGE,type=int64; missing=0 (0.0%); unique=56
+Column,BILL_AMT1,type=int64; missing=0 (0.0%); unique=22822
+Column,BILL_AMT2,type=int64; missing=0 (0.0%); unique=22445
+Column,BILL_AMT3,type=int64; missing=0 (0.0%); unique=22120
+Column,BILL_AMT4,type=int64; missing=0 (0.0%); unique=21644
+Column,BILL_AMT5,type=int64; missing=0 (0.0%); unique=21114
+Column,BILL_AMT6,type=int64; missing=0 (0.0%); unique=20702
+Column,PAY_AMT1,type=int64; missing=0 (0.0%); unique=8021
+Column,PAY_AMT2,type=int64; missing=0 (0.0%); unique=7974
+Column,PAY_AMT3,type=int64; missing=0 (0.0%); unique=7595
+Column,PAY_AMT4,type=int64; missing=0 (0.0%); unique=7013
+Column,PAY_AMT5,type=int64; missing=0 (0.0%); unique=6987
+Column,PAY_AMT6,type=int64; missing=0 (0.0%); unique=7025
+Column,SEX,type=int64; missing=0 (0.0%); unique=2
+Column,EDUCATION,type=int64; missing=0 (0.0%); unique=7
+Column,MARRIAGE,type=int64; missing=0 (0.0%); unique=4
+Column,PAY_0,type=int64; missing=0 (0.0%); unique=11
+Column,PAY_2,type=int64; missing=0 (0.0%); unique=11
+Column,PAY_3,type=int64; missing=0 (0.0%); unique=11
+Column,PAY_4,type=int64; missing=0 (0.0%); unique=11
+Column,PAY_5,type=int64; missing=0 (0.0%); unique=11
+Column,PAY_6,type=int64; missing=0 (0.0%); unique=11
+Column,default.payment.next.month,type=int64; missing=0 (0.0%); unique=2
+Unusual code,EDUCATION = 5,280 rows. Undocumented code; kept as its own category (not deleted).
+Unusual code,EDUCATION = 6,51 rows. Undocumented code; kept as its own category (not deleted).
+Unusual code,EDUCATION = 0,14 rows. Undocumented code; kept as its own category (not deleted).
+Unusual code,MARRIAGE = 0,54 rows. Undocumented code; kept as its own category (not deleted).
+Unusual code,PAY_0 = 0,14770 rows. Not in the original UCI documentation; commonly interpreted as 'revolving credit (minimum paid)'. Kept.
+Unusual code,PAY_0 = -2,2761 rows. Not in the original UCI documentation; commonly interpreted as 'no balance / no consumption'. Kept.
+Unusual code,PAY_2 = 0,15752 rows. Not in the original UCI documentation; commonly interpreted as 'revolving credit (minimum paid)'. Kept.
+Unusual code,PAY_2 = -2,3788 rows. Not in the original UCI documentation; commonly interpreted as 'no balance / no consumption'. Kept.
+Unusual code,PAY_3 = 0,15791 rows. Not in the original UCI documentation; commonly interpreted as 'revolving credit (minimum paid)'. Kept.
+Unusual code,PAY_3 = -2,4095 rows. Not in the original UCI documentation; commonly interpreted as 'no balance / no consumption'. Kept.
+Unusual code,PAY_4 = 0,16477 rows. Not in the original UCI documentation; commonly interpreted as 'revolving credit (minimum paid)'. Kept.
+Unusual code,PAY_4 = -2,4360 rows. Not in the original UCI documentation; commonly interpreted as 'no balance / no consumption'. Kept.
+Unusual code,PAY_5 = 0,16975 rows. Not in the original UCI documentation; commonly interpreted as 'revolving credit (minimum paid)'. Kept.
+Unusual code,PAY_5 = -2,4556 rows. Not in the original UCI documentation; commonly interpreted as 'no balance / no consumption'. Kept.
+Unusual code,PAY_6 = 0,16299 rows. Not in the original UCI documentation; commonly interpreted as 'revolving credit (minimum paid)'. Kept.
+Unusual code,PAY_6 = -2,4907 rows. Not in the original UCI documentation; commonly interpreted as 'no balance / no consumption'. Kept.
