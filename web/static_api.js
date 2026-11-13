@@ -14,8 +14,16 @@
  */
 "use strict";
 
-function createStaticApi(D) {
-  const C = D.customers;            // columnar customer table
+/**
+ * D = the core data (data/core.json). `load(name)` fetches another data file
+ * (data/<name>.json) and returns its parsed JSON; files are fetched only when a page needs them.
+ */
+function createStaticApi(D, load = () => Promise.reject(new Error("No data loader."))) {
+  const C = D.customers;            // columnar customer table (the 23 inputs arrive with "features")
+  if (C.prob && C.prob.f8) {        // probabilities arrive as base64 little-endian float64
+    const bytes = Uint8Array.from(atob(C.prob.f8), (ch) => ch.charCodeAt(0));
+    C.prob = Array.from(new Float64Array(bytes.buffer));
+  }
   const N = C.ID.length;
   const M = D.model;
   const L = D.labels;
@@ -112,6 +120,7 @@ function createStaticApi(D) {
   }
   function probabilityHistogram(medium, high) {
     const fig = clone(D.templates.probability);
+    fig.data[0].x = C.prob;  // the template is stored without its 30,120 values
     const lines = [[medium, "Medium"], [high, "High"]];
     lines.forEach(([t, label], i) => {
       fig.layout.shapes[i].x0 = fig.layout.shapes[i].x1 = t;
@@ -397,10 +406,42 @@ function createStaticApi(D) {
   const POST = { "/api/predict": predict, "/api/segmentation/save": () => { throw new ApiError(READ_ONLY); },
                  "/api/retrain": () => { throw new ApiError(READ_ONLY); } };
 
-  /** Answer one request: returns {status, data}. Errors become {"error": "..."} like server.py. */
-  function handle(path, query, method = "GET", body = null) {
+  // ---- Data files fetched on demand -------------------------------------------------
+  const loaded = new Map();
+  /** Fetch data/<name>.json once; its fixed answers join D.responses, "features" joins the customer table. */
+  function ensure(name) {
+    if (!loaded.has(name)) {
+      const p = load(name).then((chunk) => {
+        if (name === "features") Object.assign(C, chunk);
+        else if (name === "downloads") D.downloads = chunk;
+        else Object.assign(D.responses, chunk);
+      });
+      p.catch(() => loaded.delete(name));  // allow a retry after a network error
+      loaded.set(name, p);
+    }
+    return loaded.get(name);
+  }
+  /** Which data file an answer needs, besides the core file that is always there. */
+  function chunkFor(path, q, method) {
+    if (method === "POST") return null;
+    if (path === "/api/customer" || path === "/api/segmentation/export.csv" || path === "/api/download/test_predictions.csv") return "features";
+    if (path === "/api/exploration" || path === "/api/exploration/bill-payment") return "exploration";
+    if (path === "/api/performance") return "performance";
+    if (path === "/api/exploration/distribution" && D.distribution_vars.includes(q.get("var"))) return `dist-${q.get("var")}`;
+    if (path === "/api/download/metrics.json" || path === "/api/download/data_quality.csv") return "downloads";
+    return null;
+  }
+
+  /** Answer one request: resolves to {status, data}. Errors become {"error": "..."} like server.py. */
+  async function handle(path, query, method = "GET", body = null) {
     try {
       const q = new URLSearchParams(query || "");
+      const chunk = chunkFor(path, q, method);
+      if (chunk) {
+        try { await ensure(chunk); } catch (e) {
+          throw new ApiError(`Could not load the data (${e.message}). Check your internet connection and try again.`, 503);
+        }
+      }
       if (method === "POST") {
         if (!POST[path]) throw new ApiError("Unknown endpoint.", 404);
         return { status: 200, data: POST[path](body || {}) };
@@ -417,15 +458,18 @@ function createStaticApi(D) {
     }
   }
 
-  return { handle, download, predictProbability, explain, ApiError };
+  /** A download: fetches the data it needs first. */
+  async function downloadAsync(path, query) {
+    const chunk = chunkFor(path, new URLSearchParams(query || ""), "GET");
+    if (chunk) await ensure(chunk);
+    return download(path, query);
+  }
+
+  return { handle, download: downloadAsync, ensure, predictProbability, explain, ApiError };
 }
 
 // ---- Wire it into the page: replace fetch('/api/...') and the download links ------------
 if (typeof window !== "undefined") {
-  const D = JSON.parse(document.getElementById("static-data").textContent);
-  const API = createStaticApi(D);
-  window.STATIC_API = API;
-
   // Hide the Plotly toolbar (zoom/pan icons) on every chart.
   if (window.Plotly) {
     const react = window.Plotly.react.bind(window.Plotly);
@@ -433,30 +477,62 @@ if (typeof window !== "undefined") {
   }
 
   const realFetch = window.fetch.bind(window);
+  const version = window.STATIC_DATA_VERSION || "";
+  /** data/<name>.json next to this page; ?v= makes browsers fetch new files after each rebuild. */
+  const loadJson = async (name) => {
+    const res = await realFetch(new URL(`data/${name}.json?v=${version}`, location.href));
+    if (!res.ok) throw new Error(`data/${name}.json answered ${res.status}`);
+    return res.json();
+  };
+  // The core file (customers, model, fixed answers for the first page) is fetched right away.
+  let apiPromise = null;
+  const getApi = () => {
+    if (!apiPromise) {
+      apiPromise = loadJson("core").then((D) => {
+        const api = createStaticApi(D, loadJson);
+        window.STATIC_API = api;
+        return api;
+      });
+      apiPromise.catch(() => { apiPromise = null; });  // a later request retries
+    }
+    return apiPromise;
+  };
+  getApi();
+
   window.fetch = async (input, options = {}) => {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
     if (url.origin !== location.origin || !url.pathname.startsWith("/api/")) return realFetch(input, options);
     const method = (options.method || "GET").toUpperCase();
     const body = options.body ? JSON.parse(options.body) : null;
-    const { status, data } = API.handle(url.pathname, url.search.slice(1), method, body);
+    let status, data;
+    try {
+      ({ status, data } = await (await getApi()).handle(url.pathname, url.search.slice(1), method, body));
+    } catch (e) {
+      status = 503;
+      data = { error: `Could not load the data (${e.message}). Check your internet connection and reload the page.` };
+    }
     return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
   };
 
   // Download buttons point at /api/... links; build the file here instead.
-  document.addEventListener("click", (e) => {
+  document.addEventListener("click", async (e) => {
     const a = e.target.closest && e.target.closest("a[href]");
     if (!a) return;
     const url = new URL(a.getAttribute("href"), location.href);
     if (url.origin !== location.origin || !url.pathname.startsWith("/api/")) return;
     e.preventDefault();
+    const label = a.textContent;
+    a.textContent = "Preparing the file…";
     try {
-      const file = API.download(url.pathname, url.search.slice(1));
+      const file = await (await getApi()).download(url.pathname, url.search.slice(1));
       const blobUrl = URL.createObjectURL(new Blob([file.body], { type: file.type }));
       const link = Object.assign(document.createElement("a"), { href: blobUrl, download: file.name });
       document.body.appendChild(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
     } catch (err) {
       alert(err.message);
+    } finally {
+      a.textContent = label;
     }
   }, true);
 }

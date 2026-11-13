@@ -1,0 +1,1896 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Credit Risk Analytics</title>
+<!--
+  One-page dashboard. Everything on screen is loaded from the Python server (server.py)
+  as JSON via fetch('/api/...'). Charts arrive as Plotly figure JSON and are drawn with
+  Plotly.js, which the server provides locally from the installed plotly package.
+  Pages are switched with the URL hash: #/overview, #/exploration, ...
+  Fonts are system fonts (Georgia + Segoe UI), so the page works without internet.
+-->
+<link rel="preload" href="plotly-cartesian-4.1.1.min.js" as="script">
+<link rel="preload" href="data/core.json?v=0f22d06f19bc" as="fetch" crossorigin="anonymous">
+<style>
+  :root {
+    --bg: #F5F7FA;          /* page background */
+    --card: #FFFFFF;
+    --primary: #1814F3;     /* active nav, buttons */
+    --blue: #2D60FF;
+    --title: #343C6A;       /* headings */
+    --ink: #232323;
+    --muted: #718EBF;       /* secondary text, axis labels */
+    --nav: #B1B1B1;         /* inactive nav */
+    --line: #E6EFF5;
+    --soft: #F5F7FA;
+    --teal: #16DBCC;
+    --pink: #FF82AC;
+    --red: #FE5C73;
+    --yellow: #FFBB38;
+    --hist: #16DBCC;        /* what happened */
+    --pred: #1814F3;        /* model estimates */
+    --radius: 25px;
+    --sans: Inter, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    --serif: var(--sans);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  a { color: var(--blue); }
+  :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  /* ---- Layout: white sidebar + main column ---- */
+  .app { display: flex; min-height: 100vh; }
+  aside { width: 260px; flex-shrink: 0; background: var(--card); border-right: 1px solid var(--line);
+          position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 0 0 30px; z-index: 15; }
+  .brand { display: flex; align-items: center; gap: 10px; height: 100px; padding: 0 38px; text-decoration: none; }
+  .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; color: var(--title); }
+  .brand-name { font: 800 1.55rem var(--sans); color: var(--title); letter-spacing: -.01em; }
+  .brand-name span { color: var(--blue); }
+  nav a { position: relative; display: flex; gap: 18px; align-items: center; color: var(--nav); text-decoration: none;
+          padding: 0 30px; height: 54px; font-weight: 500; font-size: .98rem; white-space: nowrap; }
+  nav a svg { flex-shrink: 0; }
+  nav a:hover { color: var(--title); }
+  nav a.active { color: var(--primary); }
+  nav a.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 6px;
+                         background: var(--primary); border-radius: 0 10px 10px 0; }
+  .side-card { margin: 18px 22px 0; background: var(--soft); border-radius: 18px; padding: 16px 18px; }
+  .side-card h4 { margin: 0 0 4px; font: 600 .95rem var(--sans); color: var(--title); }
+  .range-field { margin: 10px 0 6px; }
+  .range-field label { display: flex; justify-content: space-between; font-size: .8rem; color: var(--muted); }
+  .range-field label b { color: var(--primary); font-size: .95rem; }
+  input[type=range] { width: 100%; accent-color: var(--primary); }
+  .band { display: flex; height: 22px; border-radius: 11px; overflow: hidden; margin: 8px 0 6px; font-size: .68rem;
+          color: #fff; font-weight: 600; }
+  .band div { display: grid; place-items: center; overflow: hidden; white-space: nowrap; transition: width .2s; }
+  .link-btn { background: none; border: none; color: var(--blue); font: 600 .8rem var(--sans); cursor: pointer;
+              padding: 0; }
+  .link-btn:hover { text-decoration: underline; }
+  details summary { cursor: pointer; font-weight: 600; color: var(--blue); padding: 6px 0 2px; font-size: .85rem; }
+
+  .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { position: sticky; top: 0; z-index: 12; background: var(--card); border-bottom: 1px solid var(--line);
+            height: 100px; display: flex; align-items: center; gap: 16px; padding: 0 40px; }
+  .topbar h1 { font: 600 1.75rem var(--sans); color: var(--title); margin: 0; white-space: nowrap; }
+  .topbar .spacer { flex: 1; }
+  .data-label { font-size: .85rem; color: var(--muted); background: var(--soft); border-radius: 40px; padding: 10px 18px;
+                white-space: nowrap; }
+  .icon-btn { width: 50px; height: 50px; border-radius: 50%; border: none; background: var(--soft); color: var(--muted);
+              font: 700 1.05rem var(--sans); cursor: pointer; display: grid; place-items: center; flex-shrink: 0; }
+  .icon-btn:hover { color: var(--blue); background: #EDF1FF; }
+  #menu-btn { display: none; }
+  .view-switch { display: inline-flex; background: var(--soft); border-radius: 40px; padding: 4px; }
+  .view-switch button { background: transparent; color: var(--muted); border: none; padding: 9px 16px; cursor: pointer;
+                        font: 600 .85rem var(--sans); border-radius: 40px; }
+  .view-switch button.on { background: var(--primary); color: #fff; }
+
+  main { padding: 24px 40px 20px; max-width: 1480px; width: 100%; }
+  .intro { color: var(--muted); max-width: 900px; margin: 0 0 18px; }
+  h3, .panel-title { font: 600 1.3rem var(--sans); color: var(--title); margin: 28px 0 14px; }
+  .panel-title { margin: 0 0 14px; display: flex; flex-direction: column; gap: 2px; min-height: 1.6em; }
+  .panel-title small { font: 400 .82rem var(--sans); color: var(--muted); }
+  .grid > .panel { display: flex; flex-direction: column; }
+  .grid > .panel > .card { flex: 1; }
+  footer { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--line); font-size: .78rem; color: var(--muted);
+           display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
+  /* ---- KPI cards (first one = blue "bank card") ---- */
+  .kpis { display: grid; grid-template-columns: repeat(var(--n, 6), minmax(0, 1fr)); gap: 22px; margin: 0 0 26px; }
+  .kpi { background: var(--card); border-radius: var(--radius); padding: 20px 22px; min-height: 120px; display: flex;
+         flex-direction: column; gap: 12px; align-items: flex-start; }
+  .kpi-icon { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; }
+  .kpi.hist .kpi-icon { background: #DCFAF8; color: var(--teal); }
+  .kpi.pred .kpi-icon { background: #E7EDFF; color: #396AFF; }
+  .kpi.plain .kpi-icon { background: #FFF5D9; color: var(--yellow); }
+  .kpi-body { min-width: 0; }
+  .kpi-label { font-size: .8rem; color: var(--muted); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .kpi-value { font: 600 1.45rem/1.25 var(--sans); color: var(--title); margin-top: 4px; }
+  .kpi-note { font-size: .76rem; color: var(--muted); margin-top: 2px; }
+  .kpi.hero { background: linear-gradient(107deg, #4C49ED 2.6%, #0A06F4 101.2%); color: #fff; }
+  .kpi.hero .kpi-icon { background: rgba(255,255,255,.18); color: #fff; }
+  .kpi.hero .kpi-label, .kpi.hero .kpi-note { color: rgba(255,255,255,.75); }
+  .kpi.hero .kpi-value { color: #fff; }
+  .kpi.hero .tag { background: rgba(255,255,255,.2); color: #fff; }
+  .kpi.hero .info { border-color: rgba(255,255,255,.6); color: #fff; }
+  .tag { display: inline-block; font-size: .6rem; padding: 2px 8px; border-radius: 20px; font-weight: 700;
+         letter-spacing: .04em; }
+  .tag.hist { background: #DCFAF8; color: #0E9F94; }
+  .tag.pred { background: #E7EDFF; color: var(--primary); }
+
+  /* ---- Info tooltips ---- */
+  .info { position: relative; display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%;
+          border: 1px solid #B8C5DE; color: var(--muted); font: italic 700 10px Georgia, serif; cursor: help;
+          text-transform: none; letter-spacing: 0; }
+  .info:hover, .info:focus { border-color: var(--blue); color: var(--blue); }
+  .info .tip { display: none; position: absolute; z-index: 30; left: 50%; top: 20px; transform: translateX(-50%);
+               width: 260px; background: var(--title); color: #fff; font: 400 .78rem/1.45 var(--sans); padding: 10px 12px;
+               border-radius: 12px; box-shadow: 0 8px 24px rgba(52,60,106,.25); text-align: left; }
+  .info:hover .tip, .info:focus .tip { display: block; }
+
+  /* ---- Cards, panels, grid ---- */
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px; margin-bottom: 26px; }
+  .panel { min-width: 0; }
+  .card { background: var(--card); border-radius: var(--radius); overflow: hidden; }
+  .card.pad { padding: 22px 24px; }
+  .card-title { font: 600 1.05rem var(--sans); color: var(--title); margin: 0 0 12px; }
+  .chart { min-height: 340px; }
+  .card > .chart, .card > [id^="c-"] { margin: 14px 16px 8px; }
+  .note { background: var(--card); border-radius: 18px; padding: 14px 18px; font-size: .9rem; color: #4B5675;
+          margin: 0 0 20px; border-left: 5px solid var(--blue); }
+  .caption { font-size: .82rem; color: var(--muted); margin: 8px 0; }
+  .alert { border-radius: 14px; padding: 12px 16px; margin: 8px 0; font-size: .9rem; }
+  .alert.ok { background: #DCFAF8; color: #0B7F76; }
+  .alert.warn { background: #FFF5D9; color: #8A6100; }
+  .alert.error { background: #FFE0EB; color: #B0153C; }
+  .alert.info { background: #E7EDFF; color: var(--primary); }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  .loading { display: flex; align-items: center; gap: 12px; color: var(--muted); padding: 50px 0; }
+  .spinner { width: 22px; height: 22px; border: 3px solid var(--line); border-top-color: var(--primary); border-radius: 50%;
+             animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #progress { position: fixed; top: 0; left: 0; height: 3px; width: 0; background: var(--primary); transition: width .3s;
+              z-index: 40; }
+  #progress.on { width: 70%; }
+
+  /* ---- Tables (like the "Recent Transaction" list) ---- */
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+  th { color: var(--muted); font-weight: 500; text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line);
+       cursor: pointer; user-select: none; vertical-align: bottom; font-size: .82rem; }
+  th:hover { color: var(--blue); }
+  th.num, td.num { text-align: right; }
+  td { padding: 12px; border-bottom: 1px solid #F2F4F7; color: var(--ink); font-variant-numeric: tabular-nums;
+       white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: #F8FAFF; }
+  .wrap td { white-space: normal; }
+  .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; font-size: .82rem;
+           color: var(--muted); margin-top: 10px; }
+
+  /* ---- Controls: pill buttons and inputs ---- */
+  .btn { border: 1px solid var(--line); background: var(--card); color: var(--blue); border-radius: 50px;
+         padding: 11px 22px; font: 600 .9rem var(--sans); cursor: pointer; text-decoration: none; display: inline-flex;
+         gap: 8px; align-items: center; }
+  .btn:hover { border-color: var(--blue); }
+  .btn.primary { background: var(--primary); color: #fff; border-color: var(--primary);
+                 box-shadow: 0 6px 16px rgba(24,20,243,.25); }
+  .btn.primary:hover { background: #0F0BD0; }
+  .btn.small { padding: 7px 14px; font-size: .82rem; }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  .btn-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
+  .control-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 14px 0; }
+  .control-row > label { font-weight: 600; color: var(--title); }
+  .control-row input[type=range] { flex: 1; min-width: 240px; }
+  .tabs { display: flex; gap: 6px; border-bottom: 1px solid #DFEAF2; margin: 0 0 22px; flex-wrap: wrap; }
+  .tabs button { border: none; background: none; padding: 12px 18px; font: 500 .95rem var(--sans); color: var(--muted);
+                 cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; border-radius: 10px 10px 0 0; }
+  .tabs button:hover { color: var(--blue); }
+  .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .segmented { display: inline-flex; background: var(--card); border-radius: 50px; padding: 4px; }
+  .segmented label { padding: 9px 18px; cursor: pointer; font-size: .88rem; border-radius: 50px; color: var(--muted);
+                     font-weight: 500; }
+  .segmented input { display: none; }
+  .segmented label:has(input:checked) { background: var(--primary); color: #fff; }
+  select, input[type=number] { width: 100%; padding: 12px 18px; border: 1px solid #DFEAF2; border-radius: 15px;
+                               font: inherit; background: #fff; color: var(--title); }
+  select:focus, input[type=number]:focus { border-color: var(--blue); outline: none; }
+  .field label { display: block; font-size: .82rem; color: var(--title); margin-bottom: 6px; }
+  .form-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin: 8px 0 18px; }
+  .form-row.month { grid-template-columns: 1.4fr 1fr 1fr; margin: 8px 0; }
+  .form-section { font: 600 1.05rem var(--sans); color: var(--title); margin: 16px 0 8px; }
+  .filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+  .filter { background: var(--card); border-radius: 20px; padding: 14px 18px; }
+  .filter .head { display: flex; justify-content: space-between; font-size: .82rem; color: var(--title);
+                  font-weight: 600; margin-bottom: 8px; }
+  .filter label { display: inline-flex; gap: 6px; align-items: center; margin: 3px 14px 3px 0; font-size: .86rem;
+                  color: #4B5675; cursor: pointer; }
+  .filter input { accent-color: var(--primary); }
+  .id-search { display: flex; gap: 8px; align-items: center; }
+  .id-search input { width: 150px; background: var(--card); border-radius: 40px; }
+
+  /* ---- Individual result ---- */
+  .result-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .big-number { font: 700 3rem/1 var(--sans); color: var(--title); }
+  .seg-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px;
+              font-weight: 600; font-size: .88rem; background: var(--soft); color: var(--title); }
+  .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .gauge { position: relative; margin: 32px 0 30px; }
+  .gauge .track { display: flex; height: 12px; border-radius: 6px; overflow: hidden; }
+  .gauge .marker { position: absolute; top: -7px; width: 26px; height: 26px; border-radius: 50%; background: #fff;
+                   border: 6px solid var(--primary); transform: translateX(-50%); box-shadow: 0 2px 8px rgba(24,20,243,.3); }
+  .gauge .marker::after { content: attr(data-label); position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%);
+                          font-size: .78rem; font-weight: 700; color: var(--primary); white-space: nowrap; }
+  .gauge .scale { position: relative; height: 16px; font-size: .72rem; color: var(--muted); margin-top: 6px; }
+  .gauge .scale span { position: absolute; transform: translateX(-50%); }
+  .gauge .scale span:first-child { transform: none; }
+  .gauge .scale span:last-child { transform: translateX(-100%); }
+  .muted { color: var(--muted); font-weight: 400; font-size: .85rem; }
+
+  /* ---- Help dialog ---- */
+  dialog { border: none; border-radius: var(--radius); padding: 0; max-width: 720px; width: calc(100% - 32px);
+           color: var(--ink); box-shadow: 0 20px 60px rgba(52,60,106,.3); }
+  dialog::backdrop { background: rgba(52,60,106,.4); }
+  .dlg-head { display: flex; justify-content: space-between; align-items: center; padding: 20px 26px;
+              border-bottom: 1px solid var(--line); }
+  .dlg-head h2 { font: 600 1.35rem var(--sans); color: var(--title); margin: 0; }
+  .dlg-body { padding: 8px 26px 24px; max-height: 70vh; overflow-y: auto; }
+  dl { margin: 0; }
+  dt { font-weight: 600; color: var(--title); margin-top: 14px; }
+  dd { margin: 3px 0 0; color: #4B5675; }
+
+  /* ---- Plain-language summary + Simple/Detailed view ---- */
+  .in-short { background: #E7EDFF; border-radius: 20px; padding: 18px 24px; margin: 0 0 24px; font-size: .98rem;
+              line-height: 1.6; color: var(--title); }
+  .in-short .label { font: 700 .72rem var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--primary); }
+  .in-short ul { margin: 0; padding-left: 20px; }
+  .in-short li { margin: 6px 0; }
+  .card .in-short { background: var(--soft); }
+  .insights { display: grid; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); gap: 20px; margin: 0 0 28px; }
+  @media (max-width: 1000px) { .insights { grid-template-columns: 1fr; } }
+  .insight { background: var(--card); border-radius: 20px; padding: 20px 22px; display: flex; gap: 16px;
+             align-items: flex-start; box-shadow: 0 2px 10px rgba(52,60,106,.04); }
+  .insight .ic { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; }
+  .insight.i0 .ic { background: #E7EDFF; color: #396AFF; }
+  .insight.i1 .ic { background: #FFE0EB; color: #FF82AC; }
+  .insight.i2 .ic { background: #DCFAF8; color: #16DBCC; }
+  .insight.i3 .ic { background: #FFF5D9; color: #FFBB38; }
+  .insight .tx { font-size: 1rem; line-height: 1.6; color: #4B5675; padding-top: 2px; }
+  .insight .tx strong { color: var(--title); font-weight: 700; font-size: 1.08em; }
+  .insight .tx b { color: var(--title); }
+  .intro { font-size: 1rem; color: #5A6A8F; }
+
+  /* ---- Welcome section on the Summary page (premium "aurora" banner) ---- */
+  .welcome { position: relative; overflow: hidden; isolation: isolate; display: flex; gap: 30px; align-items: center;
+             background: radial-gradient(120% 140% at 0% 0%, #2A1F8F 0%, #15104F 45%, #0B0A2E 100%);
+             color: #fff; border-radius: 28px; padding: 44px 46px; margin: 0 0 8px;
+             box-shadow: 0 30px 60px -20px rgba(21,16,79,.55), 0 10px 24px rgba(59,52,240,.18); }
+  /* Thin shimmering edge, like a metal card. */
+  .welcome-edge { position: absolute; inset: 0; border-radius: inherit; padding: 1px; z-index: 2; pointer-events: none;
+                  background: linear-gradient(135deg, rgba(255,255,255,.55), rgba(255,215,160,.35) 25%,
+                              rgba(255,255,255,.05) 50%, rgba(160,140,255,.45) 80%, rgba(255,255,255,.25));
+                  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+                  -webkit-mask-composite: xor; mask-composite: exclude; }
+  /* Soft blurred colour glows drifting slowly. */
+  .welcome::before { content: ""; position: absolute; inset: -40%; z-index: -2; filter: blur(80px); opacity: .95;
+                     background:
+                       radial-gradient(circle at 20% 25%, rgba(139,92,246,.85), transparent 30%),
+                       radial-gradient(circle at 75% 20%, rgba(45,96,255,.80), transparent 30%),
+                       radial-gradient(circle at 55% 80%, rgba(236,72,153,.55), transparent 30%),
+                       radial-gradient(circle at 92% 75%, rgba(22,219,204,.45), transparent 26%),
+                       radial-gradient(circle at 8% 90%, rgba(99,102,241,.70), transparent 32%);
+                     animation: aurora 18s ease-in-out infinite alternate; }
+  /* Fine film grain + light sheen for a premium, printed feel. */
+  .welcome::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .9;
+                    background:
+                      linear-gradient(115deg, rgba(255,255,255,.10) 0%, rgba(255,255,255,0) 40%),
+                      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .07 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+  @keyframes aurora {
+    0%   { transform: translate(0, 0) rotate(0deg) scale(1); }
+    50%  { transform: translate(-5%, 4%) rotate(10deg) scale(1.07); }
+    100% { transform: translate(5%, -3%) rotate(-8deg) scale(1.12); }
+  }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(22,219,204,.6); } 50% { box-shadow: 0 0 0 6px rgba(22,219,204,0); } }
+  @media (prefers-reduced-motion: reduce) { .welcome::before, .eyebrow::before { animation: none; } }
+
+  .welcome-text { flex: 1; min-width: 0; position: relative; z-index: 1; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: .72rem; font-weight: 700;
+             letter-spacing: .16em; text-transform: uppercase; color: rgba(255,255,255,.85);
+             background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); border-radius: 40px;
+             padding: 6px 14px; backdrop-filter: blur(8px); }
+  .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #16DBCC;
+                     animation: pulse 2.4s ease-in-out infinite; }
+  .welcome h2 { font: 700 2rem/1.25 var(--sans); letter-spacing: -.02em; margin: 16px 0 12px; max-width: 760px; }
+  .welcome h2 .glow { background: linear-gradient(90deg, #A5B4FC 0%, #F0ABFC 45%, #5EEAD4 100%);
+                      -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .welcome p { margin: 0; color: rgba(255,255,255,.78); font-size: 1.04rem; max-width: 640px; line-height: 1.65; }
+  .welcome-actions { display: flex; gap: 12px; margin-top: 26px; flex-wrap: wrap; }
+  .btn.white { background: #fff; color: #1B1464; border-color: #fff;
+               box-shadow: 0 8px 24px rgba(165,180,252,.35), 0 0 0 4px rgba(255,255,255,.08); }
+  .btn.white:hover { background: #F2F0FF; transform: translateY(-1px); }
+  .btn.ghost { background: rgba(255,255,255,.08); color: #fff; border-color: rgba(255,255,255,.28);
+               backdrop-filter: blur(8px); }
+  .btn.ghost:hover { border-color: rgba(255,255,255,.6); background: rgba(255,255,255,.14); }
+
+  .welcome-art { position: relative; z-index: 1; width: 270px; height: 180px; flex-shrink: 0; }
+  .mini-card { position: absolute; left: 0; top: 0; width: 205px; background: rgba(255,255,255,.08);
+               border: 1px solid rgba(255,255,255,.22); border-radius: 20px; padding: 15px 17px;
+               backdrop-filter: blur(18px) saturate(160%); -webkit-backdrop-filter: blur(18px) saturate(160%);
+               box-shadow: 0 12px 34px rgba(5,3,40,.35), inset 0 1px 0 rgba(255,255,255,.18); }
+  .mini-card span, .mini-card small { display: block; font-size: .72rem; color: rgba(255,255,255,.72); }
+  .mini-card b { display: block; font-size: 1.7rem; margin: 2px 0 8px; letter-spacing: -.01em; }
+  .mini-card i { display: block; height: 6px; border-radius: 3px; margin-bottom: 7px;
+                 background: linear-gradient(90deg, #F0ABFC, #FE5C73); box-shadow: 0 0 12px rgba(254,92,115,.6); }
+  .mini-card.two { left: 92px; top: 96px; width: 165px; background: rgba(255,255,255,.90); color: var(--title);
+                   border: 1px solid rgba(255,255,255,.95);
+                   box-shadow: 0 18px 40px rgba(5,3,40,.45), 0 0 0 6px rgba(255,255,255,.06); }
+  .mini-card.two span, .mini-card.two small { color: var(--muted); }
+  .mini-card.two b { color: #0E9F94; }
+  .section-head h3 { margin: 30px 0 14px; }
+  .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .step { background: var(--card); border-radius: 20px; padding: 20px 22px; display: flex; gap: 16px; align-items: flex-start; }
+  .step .num { width: 40px; height: 40px; border-radius: 50%; background: #E7EDFF; color: var(--primary);
+               font-weight: 700; display: grid; place-items: center; flex-shrink: 0; font-size: 1.05rem; }
+  .step-title { font-weight: 600; color: var(--title); font-size: 1.02rem; margin: 2px 0 4px; }
+  .step-text { color: #5A6A8F; font-size: .92rem; line-height: 1.55; }
+  .tools { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px; }
+  .tool { background: var(--card); border-radius: 20px; padding: 20px; text-decoration: none; color: inherit;
+          display: flex; flex-direction: column; gap: 8px; border: 2px solid transparent; transition: border-color .15s, transform .15s; }
+  .tool:hover { border-color: var(--blue); transform: translateY(-2px); }
+  .tool-ic { width: 46px; height: 46px; border-radius: 14px; background: #E7EDFF; color: var(--primary);
+             display: grid; place-items: center; }
+  .tool-title { font-weight: 600; color: var(--title); font-size: 1rem; }
+  .tool-text { color: #5A6A8F; font-size: .86rem; line-height: 1.5; flex: 1; }
+  .tool-go { color: var(--blue); font-weight: 600; font-size: .85rem; }
+  @media (max-width: 1250px) { .tools { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 900px) {
+    .welcome { flex-direction: column; align-items: flex-start; padding: 26px; }
+    .welcome-art { display: none; }
+    .steps, .tools { grid-template-columns: 1fr; }
+  }
+  body.simple .tech { display: none !important; }
+  body:not(.simple) .simple-only { display: none !important; }
+  .tech-note { font-size: .82rem; color: var(--muted); margin: 4px 0 14px; }
+  body:not(.simple) .tech-note { display: none; }
+
+  /* ---- Premium frame: midnight-aurora sidebar and top bar (matches the Summary banner) ---- */
+  :root {
+    --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .06 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  aside { border-right: none; overflow-x: hidden; color: #fff;
+          background: var(--grain),
+            radial-gradient(70% 28% at 15% 0%, rgba(139,92,246,.55), transparent 70%),
+            radial-gradient(70% 30% at 100% 55%, rgba(45,96,255,.30), transparent 70%),
+            radial-gradient(60% 25% at 0% 100%, rgba(236,72,153,.28), transparent 70%),
+            linear-gradient(180deg, #1A1258 0%, #100C3C 55%, #0B0A2E 100%);
+          box-shadow: 6px 0 30px rgba(11,10,46,.18);
+          scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+  aside::-webkit-scrollbar { width: 6px; }
+  aside::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 3px; }
+  .brand-mark { color: #C7D2FE; }
+  .brand-name { color: #fff; }
+  .brand-name span { background: linear-gradient(90deg, #A5B4FC, #F0ABFC, #5EEAD4); -webkit-background-clip: text;
+                     background-clip: text; color: transparent; }
+  nav a { color: rgba(255,255,255,.55); margin: 2px 14px; padding: 0 16px; border-radius: 14px; height: 50px; }
+  nav a:hover { color: #fff; background: rgba(255,255,255,.06); }
+  nav a.active { color: #fff; background: linear-gradient(90deg, rgba(139,92,246,.35), rgba(45,96,255,.18));
+                 box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 8px 20px rgba(11,10,46,.25); }
+  nav a.active::before { left: -14px; width: 5px; background: linear-gradient(180deg, #5EEAD4, #A78BFA);
+                         box-shadow: 0 0 12px rgba(94,234,212,.7); }
+  nav a.active svg { color: #A5B4FC; }
+  .side-card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+               backdrop-filter: blur(10px); }
+  .side-card h4 { color: #fff; }
+  .side-card .caption, .range-field label { color: rgba(255,255,255,.62); }
+  .range-field label b { color: #C7D2FE; }
+  aside input[type=range] { accent-color: #A78BFA; }
+  aside .link-btn, aside details summary { color: #A5B4FC; }
+  aside .btn.primary { background: linear-gradient(90deg, #6D5BF7, #2D60FF); border-color: transparent;
+                       box-shadow: 0 6px 18px rgba(109,91,247,.4); }
+  aside .alert.error { background: rgba(254,92,115,.18); color: #FFD1DA; }
+
+  .topbar { border-bottom: 1px solid rgba(255,255,255,.08); color: #fff;
+            background: var(--grain),
+              radial-gradient(40% 160% at 10% 0%, rgba(139,92,246,.45), transparent 70%),
+              radial-gradient(35% 160% at 70% 100%, rgba(236,72,153,.22), transparent 70%),
+              radial-gradient(35% 160% at 100% 0%, rgba(45,96,255,.45), transparent 70%),
+              linear-gradient(90deg, #15104F 0%, #1C1566 50%, #17227A 100%);
+            box-shadow: 0 10px 30px -12px rgba(11,10,46,.45); }
+  .topbar h1 { color: #fff; letter-spacing: -.01em; }
+  .data-label { background: rgba(255,255,255,.08); color: rgba(255,255,255,.75); border: 1px solid rgba(255,255,255,.14); }
+  .view-switch { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+  .view-switch button { color: rgba(255,255,255,.7); }
+  .view-switch button.on { background: linear-gradient(90deg, #6D5BF7, #2D60FF); color: #fff;
+                           box-shadow: 0 4px 14px rgba(109,91,247,.45); }
+  .icon-btn { background: rgba(255,255,255,.08); color: rgba(255,255,255,.8); border: 1px solid rgba(255,255,255,.14); }
+  .icon-btn:hover { background: rgba(255,255,255,.16); color: #fff; }
+
+  /* Page intro line as a premium frosted pill with a glowing sparkle. */
+  .intro { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; margin: 0 0 20px;
+           padding: 10px 20px 10px 14px; border-radius: 40px; font-size: .95rem; font-weight: 500; color: #3B3577;
+           background: linear-gradient(90deg, rgba(139,92,246,.12), rgba(45,96,255,.06) 60%, rgba(94,234,212,.08));
+           border: 1px solid rgba(139,92,246,.20); box-shadow: 0 6px 18px -8px rgba(76,73,237,.35);
+           backdrop-filter: blur(8px); }
+  .intro::before { content: "✦"; flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; display: grid;
+                   place-items: center; font-size: .8rem; color: #fff;
+                   background: linear-gradient(135deg, #8B5CF6, #2D60FF 60%, #16DBCC);
+                   box-shadow: 0 0 0 4px rgba(139,92,246,.12), 0 4px 12px rgba(109,91,247,.45); }
+  .intro:empty { display: none; }
+
+  /* ---- Responsive & print ---- */
+  @media (max-width: 1250px) {
+    .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .data-label { display: none; }
+  }
+  @media (max-width: 900px) {
+    #menu-btn { display: grid; }
+    aside { position: fixed; left: 0; top: 0; transform: translateX(-100%); transition: transform .2s;
+            box-shadow: 4px 0 24px rgba(52,60,106,.2); z-index: 30; }
+    body.menu-open aside { transform: none; }
+    .topbar { padding: 0 16px; height: 76px; gap: 10px; }
+    .topbar h1 { font-size: 1.2rem; white-space: normal; }
+    main { padding: 18px 16px; }
+    .grid, .kpis, .filters, .form-row, .form-row.month { grid-template-columns: 1fr; }
+    #print-btn { display: none; }
+  }
+  @media print {
+    aside, .topbar .view-switch, .icon-btn, .btn-row, .btn, .tabs, #progress, .control-row input { display: none !important; }
+    body { background: #fff; }
+    main { padding: 0; max-width: none; }
+    .card, .kpi { break-inside: avoid; border: 1px solid var(--line); }
+  }
+</style>
+
+<style>
+  /* Online (GitHub Pages) version: retraining and saving to outputs/ need the Python server. */
+  .side-card details, #save-seg { display: none !important; }
+  /* Phones: keep the top bar inside the screen width. */
+  @media (max-width: 600px) {
+    .topbar { gap: 6px; }
+    .topbar h1 { font-size: 1.1rem; white-space: normal; min-width: 0; }
+    .topbar .icon-btn { width: 38px; height: 38px; flex: none; }
+    .topbar .view-switch button { padding: 6px 10px; }
+    #print-btn { display: none; }
+    .grid > * { min-width: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<div class="app">
+  <aside>
+    <a class="brand" href="#/overview" title="Credit Risk Analytics">
+      <span class="brand-mark"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/>
+        <path d="M2 10h20M6 15h4"/></svg></span>
+      <span class="brand-name">CreditRisk<span>.</span></span>
+    </a>
+    <nav id="nav"></nav>
+
+    <div class="side-card">
+      <h4>Risk group levels</h4>
+      <div class="caption">From which estimated chance a customer counts as medium or high risk. These are example
+        levels you can change, not bank rules.</div>
+      <div class="range-field">
+        <label for="t-medium">Medium risk from <b id="t-medium-val"></b></label>
+        <input type="range" id="t-medium" min="5" max="90" step="1">
+      </div>
+      <div class="range-field">
+        <label for="t-high">High risk from <b id="t-high-val"></b></label>
+        <input type="range" id="t-high" min="10" max="95" step="1">
+      </div>
+      <div class="band" id="band" aria-hidden="true"></div>
+      <div id="t-error" class="alert error" hidden>Medium must be lower than High.</div>
+      <button class="link-btn" id="t-reset">Reset to 30% / 50%</button>
+    </div>
+
+    <div class="side-card">
+      <h4>The model</h4>
+      <div id="model-info" class="caption"></div>
+      <details>
+        <summary>Teach the model again</summary>
+        <div class="caption">Only needed after the data files change. Takes about 30 seconds.</div>
+        <label class="caption tech"><input type="checkbox" id="balanced"> Use class_weight="balanced"
+          (catches more at 50%, but estimates come out too high)</label>
+        <button class="btn primary small" id="retrain">Teach again now</button>
+        <div id="retrain-msg" class="caption"></div>
+      </details>
+    </div>
+  </aside>
+
+  <div class="main-col">
+    <header class="topbar">
+      <button class="icon-btn" id="menu-btn" aria-label="Open menu">☰</button>
+      <h1 id="page-title"></h1>
+      <span class="spacer"></span>
+      <span class="data-label" id="data-label"></span>
+      <span class="view-switch" role="group" aria-label="Level of detail">
+        <button id="view-simple" title="Plain-language view">Simple</button>
+        <button id="view-detail" title="Show technical charts and tables too">Detailed</button>
+      </span>
+      <button class="icon-btn" id="help-btn" title="Word list and how to use this dashboard" aria-label="Help">?</button>
+      <button class="icon-btn" id="print-btn" title="Print or save this page as PDF" aria-label="Print">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><rect x="6" y="14" width="12" height="8"/>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/></svg></button>
+    </header>
+    <main>
+      <p class="intro" id="page-intro"></p>
+      <div id="page"></div>
+      <footer>
+        <span>Data: UCI “Default of Credit Card Clients” (Yeh &amp; Lien, 2009) plus any added data files.</span>
+        <span>Model estimates are not guarantees or lending decisions.</span>
+      </footer>
+    </main>
+  </div>
+</div>
+
+<dialog id="help">
+  <div class="dlg-head"><h2>How to read this dashboard</h2><button class="btn small" id="help-close">Close</button></div>
+  <div class="dlg-body">
+    <p>This dashboard looks at past credit-card customers and uses a computer model to estimate how likely each
+       customer is to <b>miss next month's payment</b>.</p>
+    <p>Cards marked <span class="tag hist">WHAT HAPPENED</span> count what really happened. Cards marked
+       <span class="tag pred">ESTIMATE</span> are the model's guesses. Hover over any <span class="info">i</span>
+       for a short explanation. Start with the <b>Summary</b> page and read the "In short" box at the top of each page.</p>
+    <dl id="glossary"></dl>
+  </div>
+</dialog>
+
+<script src="plotly-cartesian-4.1.1.min.js"></script>
+<script>window.STATIC_DATA_VERSION = "0f22d06f19bc";</script>
+<script>
+/*
+ * static_api.js - answers the dashboard's /api/... requests inside the browser.
+ * ============================================================================
+ * Used only by the GitHub Pages version (index.html at the repo root, built by
+ * build_static_site.py). The page code in web/index.html is unchanged: it still calls
+ * fetch('/api/...'), and this file intercepts those calls.
+ *
+ * * Answers that never change (exploration charts, model performance, data quality...)
+ *   were computed by server.py at build time and are looked up directly.
+ * * Answers that depend on the sidebar thresholds, filters, a customer ID or the
+ *   new-customer form are computed here with the same formulas as server.py /
+ *   prediction.py, from the embedded customer table and model coefficients.
+ * * Saving files and retraining need Python, so they return a clear message.
+ */
+"use strict";
+
+/**
+ * D = the core data (data/core.json). `load(name)` fetches another data file
+ * (data/<name>.json) and returns its parsed JSON; files are fetched only when a page needs them.
+ */
+function createStaticApi(D, load = () => Promise.reject(new Error("No data loader."))) {
+  const C = D.customers;            // columnar customer table (the 23 inputs arrive with "features")
+  if (C.prob && C.prob.f8) {        // probabilities arrive as base64 little-endian float64
+    const bytes = Uint8Array.from(atob(C.prob.f8), (ch) => ch.charCodeAt(0));
+    C.prob = Array.from(new Float64Array(bytes.buffer));
+  }
+  const N = C.ID.length;
+  const M = D.model;
+  const L = D.labels;
+  const SEGMENTS = ["Low risk", "Medium risk", "High risk"];
+  const SEGMENT_COLORS = D.segment_colors;
+  const UP_COLOR = D.colors.up, DOWN_COLOR = D.colors.down;
+
+  class ApiError extends Error {
+    constructor(message, status = 400) { super(message); this.status = status; }
+  }
+
+  // ---- Python-style number formatting -----------------------------------------------
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  /** round() with banker's rounding, like Python's round(). */
+  const pyRound = (x) => {
+    const f = Math.floor(x), diff = x - f;
+    if (diff === 0.5) return f % 2 === 0 ? f : f + 1;
+    return Math.round(x);
+  };
+  const grp = (n) => Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });      // f"{n:,}"
+  const pct0 = (v) => (v == null || Number.isNaN(v) ? "n/a" : pyRound(v * 100) + "%");     // f"{v:.0%}"
+  const money = (v) => (v == null || Number.isNaN(v) ? "n/a" : `NT$ ${grp(v)}`);
+  const in100 = (p) => `${pyRound(p * 100)} out of 100`;
+  /** f"{v:,}" for a Python float, e.g. 5.0 -> "5.0", 123456.5 -> "123,456.5". */
+  const pyFloat = (v) => Number.isInteger(v) ? `${grp(v)}.0`
+    : v.toLocaleString("en-US", { maximumFractionDigits: 17 });
+  const signed0 = (x) => { const s = x.toFixed(0); return s.startsWith("-") ? s : "+" + s; };  // f"{x:+.0f}"
+
+  // ---- Labels (data_loader.py) ------------------------------------------------------
+  const friendly = (col) => {
+    col = String(col);
+    if (col.includes(" = ")) { const [c, v] = col.split(" = ", 2); return `${L.friendly[c] ?? c}: ${v}`; }
+    return L.friendly[col] ?? col;
+  };
+  const payStatus = (code) => {
+    if (code == null || Number.isNaN(code)) return "Missing";
+    code = Math.trunc(code);
+    if (code === -2) return "No bill that month";
+    if (code === -1) return "Paid in full";
+    if (code === 0) return "Paid the minimum";
+    if (code >= 1) return `${code} month${code > 1 ? "s" : ""} late`;
+    return `Unknown code ${code}`;
+  };
+  const categoryLabel = (col, code) => {
+    if (code == null || Number.isNaN(code)) return "Missing";
+    code = Math.trunc(code);
+    if (D.pay_status_cols.includes(col)) return payStatus(code);
+    const map = { SEX: L.sex, EDUCATION: L.education, MARRIAGE: L.marriage }[col] || {};
+    return map[code] ?? `Undocumented code ${code}`;
+  };
+  const MONEY_COLS = new Set(["LIMIT_BAL", ...D.bill_cols, ...D.pay_amt_cols]);
+  const displayValue = (f, v) => D.categorical_features.includes(f) ? categoryLabel(f, v)
+    : MONEY_COLS.has(f) ? `NT$ ${grp(v)}` : grp(v);
+
+  // ---- Thresholds and segments (prediction.py) --------------------------------------
+  function thresholds(q) {
+    const num = (key, dflt) => {
+      if (!q.has(key)) return dflt;
+      const v = Number(q.get(key));
+      if (q.get(key).trim() === "" || Number.isNaN(v)) throw new ApiError(`'${key}' must be a number.`);
+      return v;
+    };
+    const medium = num("medium", D.defaults.medium), high = num("high", D.defaults.high);
+    if (!(0 < medium && medium < high && high < 100)) throw new ApiError("Thresholds must satisfy 0 < medium < high < 100.");
+    return [medium / 100, high / 100];
+  }
+  const segmentOf = (p, medium, high) => (p >= high ? "High risk" : p >= medium ? "Medium risk" : "Low risk");
+  const segmentsFor = (medium, high) => C.prob.map((p) => segmentOf(p, medium, high));
+
+  function segmentSummary(seg, rows = null) {
+    const acc = Object.fromEntries(SEGMENTS.map((s) => [s, { n: 0, p: 0, d: 0 }]));
+    const idx = rows || [...Array(N).keys()];
+    for (const i of idx) { const a = acc[seg[i]]; a.n++; a.p += C.prob[i]; a.d += C.actual[i]; }
+    const total = Math.max(idx.length, 1);
+    return SEGMENTS.map((s) => {
+      const a = acc[s];
+      return { Risk_Segment: s, Customers: a.n, Avg_Probability: a.n ? a.p / a.n : null, Share: a.n / total,
+               Actual_Default_Rate: a.n ? a.d / a.n : null };
+    });
+  }
+
+  // ---- Charts that change with the thresholds (charts.py) ----------------------------
+  function segmentBar(seg, medium, high) {
+    const fig = clone(D.templates.segment_bar);
+    const t = fig.data[0];
+    t.x = seg.map((r) => r.Risk_Segment);
+    t.y = seg.map((r) => r.Customers);
+    t.marker.color = seg.map((r) => SEGMENT_COLORS[r.Risk_Segment]);
+    t.text = seg.map((r) => `${grp(r.Customers)} (${pct0(r.Share)})`);
+    t.customdata = seg.map((r) => [r.Share, r.Avg_Probability]);
+    fig.layout.title.text = fig.layout.title.text.replace(/Low below .*?(<\/span>)/,
+      `Low below ${pct0(medium)} · Medium ${pct0(medium)}–${pct0(high)} · High ${pct0(high)} and above$1`);
+    return fig;
+  }
+  function probabilityHistogram(medium, high) {
+    const fig = clone(D.templates.probability);
+    fig.data[0].x = C.prob;  // the template is stored without its 30,120 values
+    const lines = [[medium, "Medium"], [high, "High"]];
+    lines.forEach(([t, label], i) => {
+      fig.layout.shapes[i].x0 = fig.layout.shapes[i].x1 = t;
+      fig.layout.annotations[i].x = t;
+      fig.layout.annotations[i].text = `${label} from ${pct0(t)}`;
+    });
+    return fig;
+  }
+  function contributionBar(exp) {
+    const fig = clone(D.templates.contribution);
+    const e = exp.slice().reverse();
+    const t = fig.data[0];
+    t.x = e.map((r) => r.Contribution);
+    t.y = e.map((r) => `${friendly(r.Feature)}: ${r.Value}`);
+    t.marker.color = e.map((r) => (r.Contribution > 0 ? UP_COLOR : DOWN_COLOR));
+    t.customdata = e.map((r) => (r.Contribution > 0 ? "Raises the risk" : "Lowers the risk"));
+    return fig;
+  }
+
+  // ---- The model (logistic regression pipeline from model_training.py) ---------------
+  /** Same steps as the scikit-learn pipeline: impute, standardise / one-hot, in the same column order. */
+  function transform(values) {
+    const out = [];
+    M.num_features.forEach((f, j) => {
+      const v = values[f] == null || Number.isNaN(values[f]) ? M.num_median[j] : values[f];
+      out.push((v - M.num_mean[j]) / M.num_scale[j]);
+    });
+    M.cat_features.forEach((f, j) => {
+      const v = values[f] == null || Number.isNaN(values[f]) ? M.cat_mode[j] : values[f];
+      for (const cat of M.categories[j]) out.push(v === cat ? 1 : 0);  // unknown code -> all zeros
+    });
+    return out;
+  }
+  function predictProbability(values) {
+    const x = transform(values);
+    let z = M.intercept;
+    for (let i = 0; i < x.length; i++) z += M.coef[i] * x[i];
+    return 1 / (1 + Math.exp(-z));
+  }
+  /** contribution = coefficient x (value - average training value), summed per original input; top 6 by size. */
+  function explain(values, topN = 6) {
+    const x = transform(values);
+    const per = new Map();
+    x.forEach((v, i) => {
+      const f = M.sources[i];
+      per.set(f, (per.get(f) || 0) + M.coef[i] * (v - M.train_mean[i]));
+    });
+    return [...per.entries()]
+      .map(([Feature, Contribution]) => ({ Feature, Contribution }))
+      .sort((a, b) => Math.abs(b.Contribution) - Math.abs(a.Contribution))
+      .slice(0, topN)
+      .map((r) => ({ ...r, Value: displayValue(r.Feature, values[r.Feature]) }));
+  }
+
+  function predictionResult(values, proba, medium, high) {
+    const exp = explain(values);
+    const overall = D.overall;
+    const reason = (r) => `${friendly(r.Feature)} (${r.Value})`;
+    const up = exp.filter((r) => r.Contribution > 0).slice(0, 3).map(reason);
+    const down = exp.filter((r) => r.Contribution < 0).slice(0, 3).map(reason);
+    const ratio = proba / overall;
+    let compare;
+    if (ratio >= 1.15) compare = `That is about ${ratio.toFixed(1)} times the average customer (${in100(overall)}).`;
+    else if (ratio <= 0.87) compare = `That is lower than the average customer (${in100(overall)}).`;
+    else compare = `That is close to the average customer (${in100(overall)}).`;
+    return {
+      probability: proba,
+      segment: segmentOf(proba, medium, high),
+      segment_colors: SEGMENT_COLORS,
+      overall_rate: overall,
+      headline: `About ${in100(proba)} customers like this one missed their next payment.`,
+      compare,
+      summary: { direction: proba > overall ? "higher" : "lower", up, down },
+      explanation_chart: contributionBar(exp),
+    };
+  }
+
+  const rowValues = (i) => Object.fromEntries(D.feature_cols.map((f) => [f, C[f][i]]));
+  const kpi = (label, value, note = "", kind = "hist") => ({ label, value, note, kind });
+
+  // ---- Endpoints (same names and answers as server.py) -------------------------------
+  function overview(q) {
+    const [medium, high] = thresholds(q);
+    const seg = segmentsFor(medium, high);
+    const summary = segmentSummary(seg);
+    const counts = Object.fromEntries(summary.map((r) => [r.Risk_Segment, r.Customers]));
+    const d = clone(D.templates.overview);
+    d.low_share = counts["Low risk"] / N;
+    d.summary[1] = `The model sorted every customer into a risk group: ${grp(counts["Low risk"])} low, ` +
+      `${grp(counts["Medium risk"])} medium and ${grp(counts["High risk"])} high risk.`;
+    const k = d.kpis.find((x) => x.label === "Flagged as high risk");
+    k.value = grp(counts["High risk"]);
+    k.note = `${pct0(counts["High risk"] / N)} of customers`;
+    d.charts.segments = segmentBar(summary, medium, high);
+    d.charts.probability = probabilityHistogram(medium, high);
+    return d;
+  }
+
+  function segmentation(q) {
+    const [medium, high] = thresholds(q);
+    const seg = segmentSummary(segmentsFor(medium, high));
+    return {
+      summary_text: seg.filter((r) => r.Customers).map((r) => `<b>${r.Risk_Segment}</b>: ${grp(r.Customers)} customers. ` +
+        `The model gives them on average a ${pct0(r.Avg_Probability)} chance of missing a payment, and ` +
+        `${pct0(r.Actual_Default_Rate)} of them really did.`)
+        .concat(["When the two numbers are close, the estimates can be trusted."]),
+      cards: seg.map((r) => kpi(r.Risk_Segment, grp(r.Customers),
+        `${pct0(r.Share)} of customers · typical chance ` + (r.Avg_Probability == null ? "–" : pct0(r.Avg_Probability)),
+        "pred")),
+      histogram: probabilityHistogram(medium, high),
+      summary: { columns: ["Risk group", "Customers", "Share", "Estimated chance (average)", "Actually missed"],
+                 rows: seg.map((r) => [r.Risk_Segment, r.Customers, r.Share, r.Avg_Probability, r.Actual_Default_Rate]),
+                 formats: { "Customers": "int", "Share": "pct", "Estimated chance (average)": "pct", "Actually missed": "pct" } },
+      filters: D.templates.segmentation_filters,
+    };
+  }
+
+  /** Rows matching the filters (missing filter = everything; empty = nothing), like filtered_predictions(). */
+  function filtered(q) {
+    const [medium, high] = thresholds(q);
+    const seg = segmentsFor(medium, high);
+    const list = (key, allowed, sep = ",") => {
+      if (!q.has(key)) return new Set(allowed);
+      const raw = q.get(key);
+      return new Set(raw ? raw.split(sep).filter((v) => allowed.includes(v)) : []);
+    };
+    const segs = list("segment", SEGMENTS), ages = list("age", D.age_labels), limits = list("limit", D.limit_labels);
+    const splits = list("split", ["Train", "Test"]), sources = list("source", D.sources, "|");
+    const rows = [];
+    for (let i = 0; i < N; i++) {
+      if (segs.has(seg[i]) && ages.has(D.age_labels[C.age_group[i]]) && limits.has(D.limit_labels[C.limit_range[i]])
+          && splits.has(C.split[i] ? "Test" : "Train") && sources.has(D.sources[C.source[i]])) rows.push(i);
+    }
+    return { rows, seg };
+  }
+
+  function segmentCustomers(q) {
+    const { rows, seg } = filtered(q);
+    let top = q.has("top") ? Number(q.get("top")) : 25;
+    if (Number.isNaN(top)) throw new ApiError("'top' must be a number.");
+    top = Math.trunc(Math.min(Math.max(top, 1), 500));
+    // Highest probability first; ties keep the original order (pandas nlargest keep="first").
+    const best = rows.slice().sort((a, b) => C.prob[b] - C.prob[a] || a - b).slice(0, top);
+    return {
+      count: rows.length, total: N,
+      table: {
+        columns: ["Customer ID", "Estimated chance", "Risk group", "Actually missed?", "Credit limit", "Age",
+                  "Payment status – Sep", "Bill – Sep", "Amount paid – Sep", "Used for", "Data file"],
+        rows: best.map((i) => [C.ID[i], C.prob[i], seg[i], C.actual[i] ? "Yes" : "No", C.LIMIT_BAL[i], C.AGE[i],
+                               payStatus(C.PAY_0[i]), C.BILL_AMT1[i], C.PAY_AMT1[i], C.split[i] ? "Testing" : "Learning",
+                               D.sources[C.source[i]]]),
+        formats: { "Estimated chance": "pct", "Credit limit": "int", "Bill – Sep": "int", "Amount paid – Sep": "int" },
+      },
+    };
+  }
+
+  function customerDetails(i) {
+    const items = [["Credit limit", money(C.LIMIT_BAL[i])], ["Age", C.AGE[i].toFixed(0)],
+                   ["Gender", categoryLabel("SEX", C.SEX[i])], ["Education", categoryLabel("EDUCATION", C.EDUCATION[i])],
+                   ["Marital status", categoryLabel("MARRIAGE", C.MARRIAGE[i])]];
+    D.pay_status_cols.forEach((c) => items.push([`Payment status – ${L.pay_status_month[c]}`, payStatus(C[c][i])]));
+    D.bill_cols.forEach((b, k) => items.push([`Bill / amount paid – ${L.months[k + 1]}`,
+                                              `${money(C[b][i])} / ${money(C[D.pay_amt_cols[k]][i])}`]));
+    return items;
+  }
+
+  const ID_INDEX = new Map(C.ID.map((id, i) => [id, i]));
+  function customer(q) {
+    const [medium, high] = thresholds(q);
+    const raw = (q.get("id") || "").trim();
+    if (!/^[+-]?\d+$/.test(raw)) throw new ApiError("Customer ID must be a whole number.");
+    const cid = parseInt(raw, 10);
+    const i = ID_INDEX.get(cid);
+    if (i === undefined) throw new ApiError(`No customer with ID ${cid} was found.`, 404);
+    const result = predictionResult(rowValues(i), C.prob[i], medium, high);
+    return { ...result, id: cid, details: [["Source file", D.sources[C.source[i]]], ...customerDetails(i)],
+             actual: L.target[C.actual[i]], split: C.split[i] ? "Test" : "Train" };
+  }
+
+  function validate(values) {
+    const errors = [];
+    for (const col of D.feature_cols) {
+      const v = values[col];
+      if (v == null || Number.isNaN(v)) { errors.push(`${col} is required.`); continue; }
+      if (col in D.input_rules) {
+        const [lo, hi] = D.input_rules[col];
+        if (!(lo <= v && v <= hi)) errors.push(`${col} must be between ${grp(lo)} and ${grp(hi)} (got ${pyFloat(v)}).`);
+      } else if (col in D.allowed_codes && !D.allowed_codes[col].includes(Math.trunc(v))) {
+        errors.push(`${col} has an invalid code ${Number.isInteger(v) ? v.toFixed(1) : v}.`);
+      }
+    }
+    return errors;
+  }
+
+  function predict(body) {
+    const q = new URLSearchParams();
+    for (const k of ["medium", "high"]) if (k in body) q.set(k, String(body[k]));
+    const [medium, high] = thresholds(q);
+    const raw = body.values || {};
+    const values = {};
+    let errors = [];
+    for (const col of D.feature_cols) {
+      const r = raw[col];
+      if (r == null || r === "") { values[col] = null; continue; }
+      const v = Number(String(r).trim());
+      if (String(r).trim() === "" || Number.isNaN(v)) errors.push(`${col} must be a number.`);
+      else values[col] = v;
+    }
+    if (!errors.length) errors = validate(values);
+    if (errors.length) {
+      errors = errors.map((e) => { const s = e.indexOf(" "); return s >= 0 ? `${friendly(e.slice(0, s))} ${e.slice(s + 1)}` : e; });
+      throw new ApiError("Please fix the following: " + errors.join(" | "));
+    }
+    return predictionResult(values, predictProbability(values), medium, high);
+  }
+
+  function evaluate(t) {
+    let tp = 0, fp = 0, tn = 0, fn = 0;
+    for (const i of TEST_ROWS) {
+      const pred = C.prob[i] >= t, act = C.actual[i] === 1;
+      if (pred && act) tp++; else if (pred) fp++; else if (act) fn++; else tn++;
+    }
+    const n = tp + fp + tn + fn;
+    return { accuracy: (tp + tn) / n, precision: tp + fp ? tp / (tp + fp) : 0, recall: tp + fn ? tp / (tp + fn) : 0,
+             f1: 2 * tp + fp + fn ? (2 * tp) / (2 * tp + fp + fn) : 0, confusion_matrix: { tn, fp, fn, tp } };
+  }
+  const TEST_ROWS = [...Array(N).keys()].filter((i) => C.split[i] === 1);
+
+  function threshold(q) {
+    const t = q.has("t") ? Number(q.get("t")) : 0.5;
+    if (Number.isNaN(t)) throw new ApiError("'t' must be a number.");
+    if (!(0 < t && t < 1)) throw new ApiError("t must be between 0 and 1.");
+    const mt = evaluate(t), base = D.base_metrics;
+    const same = Math.abs(t - D.decision_threshold) < 1e-9;
+    const delta = (key) => (same ? "" : `${signed0((mt[key] - base[key]) * 100)} points vs the 50% level`);
+    const cards = [
+      kpi("Missed payments caught", pct0(mt.recall), delta("recall") || "recall", "plain"),
+      kpi("Warnings that were right", pct0(mt.precision), delta("precision") || "precision", "plain"),
+      kpi("Overall correct calls", pct0(mt.accuracy), delta("accuracy") || "accuracy", "plain"),
+      kpi("Balance score", pct0(mt.f1), delta("f1") || "F1 score", "plain"),
+    ];
+    return { cards, confusion: mt.confusion_matrix, threshold: t };
+  }
+
+  // ---- CSV downloads -----------------------------------------------------------------
+  const csvCell = (v) => { const s = String(v ?? ""); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const probCsv = (p) => { const r = Number(p.toFixed(4)); return Number.isInteger(r) ? r.toFixed(1) : String(r); };
+  function predictionsCsv(rows, seg, extraCorrect) {
+    const cols = D.export_columns.concat(extraCorrect ? ["Correct_Prediction"] : []);
+    const lines = [cols.join(",")];
+    for (const i of rows) {
+      const predicted = C.prob[i] >= D.decision_threshold ? 1 : 0;
+      const cell = {
+        ID: C.ID[i], Source_File: D.sources[C.source[i]], Data_Split: C.split[i] ? "Test" : "Train",
+        Actual_Default: C.actual[i], Predicted_Default_Probability: probCsv(C.prob[i]), Predicted_Default: predicted,
+        Risk_Segment: seg[i], Correct_Prediction: predicted === C.actual[i] ? 1 : 0,
+      };
+      lines.push(cols.map((c) => csvCell(c in cell ? cell[c] : C[c][i])).join(","));
+    }
+    return lines.join("\n") + "\n";
+  }
+  function download(path, query) {
+    const q = new URLSearchParams(query || "");
+    if (path === "/api/segmentation/export.csv") {
+      const { rows, seg } = filtered(q);
+      return { name: "customer_predictions_filtered.csv", type: "text/csv", body: predictionsCsv(rows, seg, false) };
+    }
+    if (path === "/api/download/test_predictions.csv") {
+      const [medium, high] = thresholds(q);
+      return { name: "test_predictions.csv", type: "text/csv", body: predictionsCsv(TEST_ROWS, segmentsFor(medium, high), true) };
+    }
+    if (path === "/api/download/metrics.json") return { name: "model_metrics.json", type: "application/json", body: D.downloads.metrics_json };
+    if (path === "/api/download/data_quality.csv") return { name: "data_quality_summary.csv", type: "text/csv", body: D.downloads.quality_csv };
+    throw new ApiError("Unknown download.", 404);
+  }
+
+  const READ_ONLY = "Not available in the online version, which cannot change files. " +
+    "Run the dashboard on your own computer (python server.py) to save results or teach the model again.";
+  const GET = {
+    "/api/overview": overview, "/api/segmentation": segmentation, "/api/segmentation/customers": segmentCustomers,
+    "/api/customer": customer, "/api/performance/threshold": threshold,
+  };
+  const POST = { "/api/predict": predict, "/api/segmentation/save": () => { throw new ApiError(READ_ONLY); },
+                 "/api/retrain": () => { throw new ApiError(READ_ONLY); } };
+
+  // ---- Data files fetched on demand -------------------------------------------------
+  const loaded = new Map();
+  /** Fetch data/<name>.json once; its fixed answers join D.responses, "features" joins the customer table. */
+  function ensure(name) {
+    if (!loaded.has(name)) {
+      const p = load(name).then((chunk) => {
+        if (name === "features") Object.assign(C, chunk);
+        else if (name === "downloads") D.downloads = chunk;
+        else Object.assign(D.responses, chunk);
+      });
+      p.catch(() => loaded.delete(name));  // allow a retry after a network error
+      loaded.set(name, p);
+    }
+    return loaded.get(name);
+  }
+  /** Which data file an answer needs, besides the core file that is always there. */
+  function chunkFor(path, q, method) {
+    if (method === "POST") return null;
+    if (path === "/api/customer" || path === "/api/segmentation/export.csv" || path === "/api/download/test_predictions.csv") return "features";
+    if (path === "/api/exploration" || path === "/api/exploration/bill-payment") return "exploration";
+    if (path === "/api/performance") return "performance";
+    if (path === "/api/exploration/distribution" && D.distribution_vars.includes(q.get("var"))) return `dist-${q.get("var")}`;
+    if (path === "/api/download/metrics.json" || path === "/api/download/data_quality.csv") return "downloads";
+    return null;
+  }
+
+  /** Answer one request: resolves to {status, data}. Errors become {"error": "..."} like server.py. */
+  async function handle(path, query, method = "GET", body = null) {
+    try {
+      const q = new URLSearchParams(query || "");
+      const chunk = chunkFor(path, q, method);
+      if (chunk) {
+        try { await ensure(chunk); } catch (e) {
+          throw new ApiError(`Could not load the data (${e.message}). Check your internet connection and try again.`, 503);
+        }
+      }
+      if (method === "POST") {
+        if (!POST[path]) throw new ApiError("Unknown endpoint.", 404);
+        return { status: 200, data: POST[path](body || {}) };
+      }
+      if (GET[path]) return { status: 200, data: GET[path](q) };
+      const fixed = D.responses[path] || D.responses[`${path}?${q.toString()}`];
+      if (fixed) return { status: 200, data: fixed };
+      if (path === "/api/exploration/bill-payment") throw new ApiError("stat must be Mean or Median.");
+      if (path === "/api/exploration/distribution") throw new ApiError(`Unknown variable '${q.get("var")}'.`);
+      throw new ApiError("Not found.", 404);
+    } catch (e) {
+      if (e instanceof ApiError) return { status: e.status, data: { error: e.message } };
+      return { status: 500, data: { error: `Unexpected error: ${e.message}` } };
+    }
+  }
+
+  /** A download: fetches the data it needs first. */
+  async function downloadAsync(path, query) {
+    const chunk = chunkFor(path, new URLSearchParams(query || ""), "GET");
+    if (chunk) await ensure(chunk);
+    return download(path, query);
+  }
+
+  return { handle, download: downloadAsync, ensure, predictProbability, explain, ApiError };
+}
+
+// ---- Wire it into the page: replace fetch('/api/...') and the download links ------------
+if (typeof window !== "undefined") {
+  // Hide the Plotly toolbar (zoom/pan icons) on every chart.
+  if (window.Plotly) {
+    const react = window.Plotly.react.bind(window.Plotly);
+    window.Plotly.react = (el, data, layout, config = {}) => react(el, data, layout, { ...config, displayModeBar: false });
+  }
+
+  const realFetch = window.fetch.bind(window);
+  const version = window.STATIC_DATA_VERSION || "";
+  /** data/<name>.json next to this page; ?v= makes browsers fetch new files after each rebuild. */
+  const loadJson = async (name) => {
+    const res = await realFetch(new URL(`data/${name}.json?v=${version}`, location.href));
+    if (!res.ok) throw new Error(`data/${name}.json answered ${res.status}`);
+    return res.json();
+  };
+  // The core file (customers, model, fixed answers for the first page) is fetched right away.
+  let apiPromise = null;
+  const getApi = () => {
+    if (!apiPromise) {
+      apiPromise = loadJson("core").then((D) => {
+        const api = createStaticApi(D, loadJson);
+        window.STATIC_API = api;
+        return api;
+      });
+      apiPromise.catch(() => { apiPromise = null; });  // a later request retries
+    }
+    return apiPromise;
+  };
+  getApi();
+
+  window.fetch = async (input, options = {}) => {
+    const url = new URL(typeof input === "string" ? input : input.url, location.href);
+    if (url.origin !== location.origin || !url.pathname.startsWith("/api/")) return realFetch(input, options);
+    const method = (options.method || "GET").toUpperCase();
+    const body = options.body ? JSON.parse(options.body) : null;
+    let status, data;
+    try {
+      ({ status, data } = await (await getApi()).handle(url.pathname, url.search.slice(1), method, body));
+    } catch (e) {
+      status = 503;
+      data = { error: `Could not load the data (${e.message}). Check your internet connection and reload the page.` };
+    }
+    return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+  };
+
+  // Download buttons point at /api/... links; build the file here instead.
+  document.addEventListener("click", async (e) => {
+    const a = e.target.closest && e.target.closest("a[href]");
+    if (!a) return;
+    const url = new URL(a.getAttribute("href"), location.href);
+    if (url.origin !== location.origin || !url.pathname.startsWith("/api/")) return;
+    e.preventDefault();
+    const label = a.textContent;
+    a.textContent = "Preparing the file…";
+    try {
+      const file = await (await getApi()).download(url.pathname, url.search.slice(1));
+      const blobUrl = URL.createObjectURL(new Blob([file.body], { type: file.type }));
+      const link = Object.assign(document.createElement("a"), { href: blobUrl, download: file.name });
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      a.textContent = label;
+    }
+  }, true);
+}
+
+if (typeof module !== "undefined") module.exports = { createStaticApi };
+
+</script>
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// Page list, icons and plain-English help text
+// ---------------------------------------------------------------------------
+const ICONS = {
+  overview: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
+  exploration: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  segmentation: '<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
+  individual: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+  performance: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  quality: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/>',
+};
+const PAGES = {
+  overview: { name: "Summary", group: "Start here", desc: "Start here: what this dashboard does",
+    intro: "Start here: what this dashboard does, how it works, and what it found." },
+  individual: { name: "Check a customer", group: "Customers", desc: "Risk for one person",
+    intro: "Look up a customer by number, or type in a new customer's details, to see their chance of missing a payment and why." },
+  segmentation: { name: "Risk groups", group: "Customers", desc: "Low, medium and high risk",
+    intro: "Every customer is put in a Low, Medium or High risk group. Find the riskiest customers and download the list." },
+  exploration: { name: "Past patterns", group: "Start here", desc: "Who missed payments before",
+    intro: "Which kinds of customers missed their payment most often in the past. Each bar shows the share who missed." },
+  performance: { name: "How reliable is it?", group: "About the model", desc: "How often is it right?",
+    intro: "We hid 1 in 5 customers from the model while it learned, then checked its guesses against what really happened to them." },
+  quality: { name: "About the data", group: "About the model", desc: "What's in the data files",
+    intro: "Where the data comes from and whether anything is missing, repeated or unusual." },
+};
+
+const HELP = {
+  "Customers": "Number of customers in the data whose outcome is known.",
+  "Missed a payment": "Share of customers who did not make their required payment the following month.",
+  "Customers who missed": "How many customers missed their payment the following month.",
+  "Average credit limit": "The average maximum a customer was allowed to spend, in New Taiwan dollars (NT$).",
+  "Flagged as high risk": "Customers the model gives a chance at or above the High level set in the sidebar.",
+  "Average estimated risk": "The model's average estimate. If it is close to the real share who missed, the estimates are realistic.",
+  "Paid on time": "Customers who made their required payment the following month.",
+  "Missed payment": "Customers who did not make their required payment the following month.",
+  "Share who missed": "Customers who missed, divided by all customers.",
+  "Lowest credit limit": "The smallest credit limit in the data.",
+  "Highest credit limit": "The largest credit limit in the data.",
+  "Low risk": "The model's estimated chance is below the Medium level in the sidebar.",
+  "Medium risk": "The estimated chance is between the Medium and High levels in the sidebar.",
+  "High risk": "The estimated chance is at or above the High level in the sidebar.",
+  "Missed payments caught": "Of the customers who really missed a payment, how many the model had warned about. (Technical name: recall.)",
+  "Warnings that were right": "Of the customers the model warned about, how many really missed a payment. The rest were false alarms. (Precision.)",
+  "Overall correct calls": "Share of all customers the model called right. Easy to look good, because most customers pay. (Accuracy.)",
+  "Ranking quality": "How well the model puts risky customers above safe ones. 0.5 = coin flip, 1.0 = perfect. (ROC-AUC.)",
+  "Balance score": "One number combining 'caught' and 'right'. Higher is better. (F1 score.)",
+  "Data files": "Number of data files combined to teach the model.",
+  "Empty cells": "Blank or unreadable values in the data.",
+  "Repeated customer IDs": "Customer numbers that appear more than once.",
+  "Repeated rows": "Rows that are exact copies of another row.",
+  "Columns": "Pieces of information per customer, including the ID and the outcome.",
+};
+const GLOSSARY = [
+  ["Missed payment (default)", "The customer did not make the required credit-card payment the following month."],
+  ["Estimated chance", "The model's guess, from 0 to 100%, that a customer will miss next month's payment. 60% means: of 100 similar customers, about 60 missed."],
+  ["What happened vs estimate", "Blue and orange show what really happened. Violet shows the model's estimates, which can be wrong."],
+  ["Risk group", "Low, Medium or High, based on the estimated chance and the levels you set in the sidebar. These levels are examples, not bank rules."],
+  ["Payment status", "How the customer paid that month: no bill, paid in full, paid the minimum, or 1 to 8 months late. September 2005 is the most recent month."],
+  ["Warning level", "From which estimated chance the model counts a customer as 'will miss' (50% normally). A lower level catches more people but gives more false alarms."],
+  ["Learning and testing", "The model learned from 4 in 5 customers. The other 1 in 5 were kept hidden and used to test it fairly."],
+  ["Ranking quality", "How well the model puts risky customers above safe ones. 0.5 is a coin flip and 1.0 is perfect."],
+  ["Why this estimate?", "Red bars are things that made a customer look riskier than a typical customer, blue bars made them look safer. This shows how the model thinks, not proof of cause."],
+  ["Simple / Detailed view", "Simple view hides technical charts. Switch to Detailed view (top bar) to see everything."],
+];
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+const $ = (sel) => document.querySelector(sel);
+const page = $("#page");
+let pending = 0;
+const SERIF = getComputedStyle(document.documentElement).getPropertyValue("--serif").trim();
+const SANS = getComputedStyle(document.documentElement).getPropertyValue("--sans").trim();
+const SEG_COLORS = { "Low risk": "#16DBCC", "Medium risk": "#FFBB38", "High risk": "#FE5C73" };
+
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+const fmtInt = (n) => Number(n).toLocaleString("en-US");
+const pct = (v, digits = 1) => (v == null ? "–" : (v * 100).toFixed(digits) + "%");
+
+/** Call the Python server and return parsed JSON. Errors become readable messages. */
+async function api(path, options = {}) {
+  pending++; $("#progress").classList.add("on");
+  try {
+    const res = await fetch(path, options);
+    const data = await res.json().catch(() => ({ error: `Server answered ${res.status}` }));
+    if (!res.ok || data.error) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
+  } finally {
+    if (--pending === 0) $("#progress").classList.remove("on");
+  }
+}
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify(body) });
+
+const THEME = { title: "#343C6A", muted: "#718EBF", grid: "#EEF2F8" };
+
+/** Draw a Plotly figure (sent by the server as JSON) in the dashboard's style.
+ *  If the chart sits in a panel (see chartBox), its title is shown as a heading above the card,
+ *  like "Weekly Activity" in a banking dashboard, and removed from inside the chart. */
+function plot(el, fig) {
+  if (typeof el === "string") el = document.getElementById(el);
+  if (!el || !fig) return;
+  const layout = { ...fig.layout, font: { ...(fig.layout.font || {}), family: SANS, color: THEME.muted },
+                   hoverlabel: { ...(fig.layout.hoverlabel || {}), font: { family: SANS, size: 12 },
+                                 bordercolor: "#E6EFF5" } };
+  const heading = document.getElementById(el.id + "-t");
+  const titleText = layout.title && layout.title.text;
+  if (heading && titleText) {
+    const [main, sub] = titleText.split("<br>");
+    const strip = (s) => (s || "").replace(/<[^>]+>/g, "");
+    heading.innerHTML = `<span>${esc(strip(main))}</span>${sub ? `<small>${esc(strip(sub))}</small>` : ""}`;
+    layout.title = { text: "" };
+    layout.margin = { ...(layout.margin || {}), t: 30 };
+  } else if (layout.title) {
+    layout.title = { ...layout.title, font: { ...(layout.title.font || {}), family: SANS, size: 16, color: THEME.title } };
+  }
+  for (const ax of ["xaxis", "yaxis"]) {
+    if (layout[ax]) layout[ax] = { ...layout[ax], gridcolor: THEME.grid, linecolor: THEME.grid, zerolinecolor: THEME.grid,
+                                   tickfont: { color: THEME.muted, size: 11 },
+                                   title: { ...(layout[ax].title || {}), font: { color: THEME.muted, size: 12 } } };
+  }
+  const data = fig.data.map((t) => t.type === "bar" || (!t.type && t.marker) ? { ...t, marker: { ...(t.marker || {}), cornerradius: 10 } } : t);
+  Plotly.react(el, data, layout, { displaylogo: false, responsive: true,
+                                   modeBarButtonsToRemove: ["lasso2d", "select2d"] });
+}
+
+const info = (text) => text ? `<span class="info" tabindex="0" aria-label="${esc(text)}">i<span class="tip">${esc(text)}</span></span>` : "";
+/** A chart with its heading above a white rounded card. */
+const chartBox = (id, h) => `<div class="panel"><div class="panel-title" id="${id}-t"></div>
+  <div class="card"><div id="${id}" class="chart"${h ? ` style="min-height:${h}px"` : ""}></div></div></div>`;
+const note = (html) => `<div class="note">${html}</div>`;
+const caption = (text) => `<div class="caption">${esc(text)}</div>`;
+/** "In short" box: plain sentences written by the server from the real numbers (may contain <b>). */
+const INSIGHT_ICONS = [
+  '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20c0-2.7-1.6-4.5-4-5.2"/>', // people
+  '<path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18h.01"/>',                                        // warning
+  '<path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/>',                                                    // trend
+  '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',                                         // info
+];
+/** Plain-language summary as a row of insight cards. Numbers are highlighted so they stand out. */
+const inShort = (lines) => {
+  if (!lines || !lines.length) return "";
+  const highlight = (t) => t.replace(/(about 1 in \d+|\d+ out of 100|\d[\d,]*(?:\.\d+)?%?)/g, "<strong>$1</strong>");
+  const cols = lines.length <= 2 ? lines.length : lines.length === 4 ? 2 : 3;  // balanced rows: 2x2, 3x2…
+  return `<div class="insights" style="--cols:${cols}">${lines.map((l, i) => `<div class="insight i${i % 4}">
+    <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">${INSIGHT_ICONS[i % 4]}</svg></div>
+    <div class="tx">${highlight(l)}</div></div>`).join("")}</div>`;
+};
+/** Shown only in Simple view, pointing to the hidden technical parts. */
+const techNote = (what) => `<div class="tech-note">More technical detail (${esc(what)}) is available in <b>Detailed</b> view (top bar).</div>`;
+const loading = (text = "Loading…") => `<div class="loading"><div class="spinner"></div>${esc(text)}</div>`;
+
+const KPI_ICONS = {
+  hist: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',                                   // bar chart
+  pred: '<path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/>',                              // trend arrow
+  plain: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/>', // shield
+};
+
+/** Row of KPI cards. The first card is the blue "bank card" highlight unless hero = false. */
+function kpis(list, n, hero = true) {
+  const cards = list.map((k, i) => {
+    const tag = k.kind === "hist" ? '<span class="tag hist">WHAT HAPPENED</span>'
+              : k.kind === "pred" ? '<span class="tag pred">ESTIMATE</span>' : "";
+    const icon = `<div class="kpi-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${KPI_ICONS[k.kind] || KPI_ICONS.plain}</svg></div>`;
+    return `<div class="kpi ${k.kind}${hero && i === 0 ? " hero" : ""}">${icon}<div class="kpi-body">
+            <div class="kpi-label">${esc(k.label)} ${info(HELP[k.label])}</div>
+            <div class="kpi-value">${esc(k.value)}</div><div class="kpi-note">${esc(k.note)}</div>
+            ${tag ? `<div style="margin-top:6px">${tag}</div>` : ""}</div></div>`;
+  }).join("");
+  return `<div class="kpis" style="--n:${n || list.length}">${cards}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Tables: {columns, rows, formats}; click a header to sort; simple paging
+// ---------------------------------------------------------------------------
+function fmtCell(v, f) {
+  if (v == null) return "";
+  if (f === "pct") return pct(v);
+  if (f === "int") return fmtInt(Math.round(v));
+  if (f === "dec1") return Number(v).toFixed(1);
+  if (f === "dec3") return Number(v).toFixed(3);
+  return v;
+}
+
+function renderTable(container, tbl, pageSize = 15) {
+  if (typeof container === "string") container = document.getElementById(container);
+  const state = { sortCol: null, asc: true, page: 0 };
+  const headers = tbl.columns.map((c) => c.replace(/_/g, " "));
+  function draw() {
+    let rows = tbl.rows.slice();
+    if (state.sortCol != null) {
+      const i = state.sortCol;
+      rows.sort((a, b) => (a[i] > b[i] ? 1 : a[i] < b[i] ? -1 : 0) * (state.asc ? 1 : -1));
+    }
+    const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+    state.page = Math.min(state.page, pages - 1);
+    const shown = rows.slice(state.page * pageSize, (state.page + 1) * pageSize);
+    const isNum = tbl.columns.map((c) => c in tbl.formats);
+    const head = headers.map((c, i) => `<th class="${isNum[i] ? "num" : ""}" data-i="${i}" title="Click to sort">${esc(c)}${
+      state.sortCol === i ? (state.asc ? " ▲" : " ▼") : ""}</th>`).join("");
+    const body = shown.map((r) => "<tr>" + r.map((v, i) => {
+      let cell = esc(fmtCell(v, tbl.formats[tbl.columns[i]]));
+      if (v in SEG_COLORS) cell = `<span class="dot" style="background:${SEG_COLORS[v]}"></span> ${cell}`;
+      return `<td class="${isNum[i] ? "num" : ""}">${cell}</td>`;
+    }).join("") + "</tr>").join("");
+    const pager = pages > 1 ? `<div class="pager"><button class="btn small" data-p="-1" ${state.page === 0 ? "disabled" : ""}>‹ Prev</button>
+       Page ${state.page + 1} of ${pages}<button class="btn small" data-p="1" ${state.page === pages - 1 ? "disabled" : ""}>Next ›</button></div>` : "";
+    container.innerHTML = `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${pager}`;
+    container.querySelectorAll("th").forEach((th) => th.onclick = () => {
+      const i = +th.dataset.i; state.asc = state.sortCol === i ? !state.asc : true; state.sortCol = i; draw();
+    });
+    container.querySelectorAll("[data-p]").forEach((b) => b.onclick = () => { state.page += +b.dataset.p; draw(); });
+  }
+  draw();
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar: navigation, thresholds (remembered in this browser), model info, retrain
+// ---------------------------------------------------------------------------
+const DEFAULTS = { medium: 30, high: 50 };
+const thresholds = { ...DEFAULTS };
+try {
+  const saved = JSON.parse(localStorage.getItem("thresholds") || "null");
+  if (saved && saved.medium < saved.high) Object.assign(thresholds, saved);
+} catch (e) { /* storage unavailable: use defaults */ }
+const tq = () => `medium=${thresholds.medium}&high=${thresholds.high}`;
+
+function renderNav(current) {
+  $("#nav").innerHTML = Object.entries(PAGES).map(([key, p]) =>
+    `<a href="#/${key}" class="${key === current ? "active" : ""}" title="${esc(p.desc)}" ${key === current ? 'aria-current="page"' : ""}>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">${ICONS[key]}</svg>${esc(p.name)}</a>`).join("");
+}
+
+function drawBand() {
+  const m = thresholds.medium, h = thresholds.high;
+  $("#band").innerHTML = `<div style="width:${m}%;background:${SEG_COLORS["Low risk"]}">Low</div>` +
+    `<div style="width:${h - m}%;background:${SEG_COLORS["Medium risk"]};color:#3a2c00">Medium</div>` +
+    `<div style="width:${100 - h}%;background:${SEG_COLORS["High risk"]}">High</div>`;
+}
+
+const THRESHOLD_PAGES = new Set(["overview", "segmentation"]);
+function setupThresholds() {
+  const m = $("#t-medium"), h = $("#t-high");
+  let timer;
+  const sync = () => {
+    $("#t-medium-val").textContent = m.value + "%";
+    $("#t-high-val").textContent = h.value + "%";
+  };
+  const apply = () => {
+    sync();
+    const ok = +m.value < +h.value;
+    $("#t-error").hidden = ok;
+    if (!ok) return;
+    thresholds.medium = +m.value; thresholds.high = +h.value;
+    drawBand();
+    try { localStorage.setItem("thresholds", JSON.stringify(thresholds)); } catch (e) { /* ignore */ }
+    clearTimeout(timer);  // wait until the slider stops moving, then reload the page's data
+    timer = setTimeout(() => { if (THRESHOLD_PAGES.has(currentPage())) route(); }, 300);
+  };
+  m.value = thresholds.medium; h.value = thresholds.high;
+  m.oninput = h.oninput = apply;
+  $("#t-reset").onclick = () => { m.value = DEFAULTS.medium; h.value = DEFAULTS.high; apply(); };
+  sync(); drawBand();
+}
+
+function showModelInfo(status) {
+  const mdl = status.model;
+  $("#model-info").innerHTML = `Learned from ${fmtInt(mdl.n_train)} past customers and tested on
+    ${fmtInt(mdl.n_test)} others.<br>Last taught: ${esc(mdl.trained_at.replace("T", " at ").slice(0, 19))}
+    <span class="tech"><br>Logistic regression · ${esc(mdl.class_weight ? "balanced" : "standard")} weights</span>`;
+  $("#balanced").checked = mdl.class_weight === "balanced";
+}
+
+$("#retrain").onclick = async () => {
+  if (!confirm("Teach the model again now? This takes about 30 seconds and replaces the saved model and result files.")) return;
+  const btn = $("#retrain");
+  btn.disabled = true; $("#retrain-msg").textContent = "Learning… (about 30 seconds)";
+  try {
+    const res = await post("/api/retrain", { balanced: $("#balanced").checked });
+    $("#retrain-msg").textContent = "✓ " + res.message;
+    showModelInfo(res.status);
+    route();
+  } catch (e) {
+    $("#retrain-msg").textContent = "That did not work: " + e.message + " The previous model is still in use.";
+  } finally { btn.disabled = false; }
+};
+
+// ---------------------------------------------------------------------------
+// Pages
+// ---------------------------------------------------------------------------
+let DATASET = null;  // set at start-up from /api/status
+
+/** Welcome section: what the dashboard is for, how it works, and what each page offers. */
+function welcome(lowShare) {
+  const n = DATASET ? fmtInt(DATASET.rows) : "thousands of";
+  const icon = (key, size = 24) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[key]}</svg>`;
+  const steps = [
+    ["Learn from the past", `The computer model studied ${n} real credit-card customers: their credit limit, bills, payments over six months, and whether they missed the next payment.`],
+    ["Estimate every customer", "For each customer it works out the chance (0–100%) that they will miss next month's payment."],
+    ["Group and explain", "Customers are sorted into Low, Medium and High risk, and each estimate comes with the reasons behind it in plain words."],
+  ];
+  const tools = [
+    ["individual", "Check a customer", "Look up anyone by number, or type in a new customer, and see their risk and why."],
+    ["segmentation", "Risk groups", "See who is low, medium or high risk, find the riskiest customers and download the list."],
+    ["exploration", "Past patterns", "Discover which kinds of customers missed payments most often in the past."],
+    ["performance", "How reliable is it?", "See how often the model was right when tested on customers it had never seen."],
+    ["quality", "About the data", "Where the data comes from and whether anything is missing or unusual."],
+  ];
+  return `
+    <section class="welcome"><span class="welcome-edge" aria-hidden="true"></span>
+      <div class="welcome-text">
+        <div class="eyebrow">Credit risk dashboard</div>
+        <h2>Spot customers who may miss their next credit-card payment, <span class="glow">before it happens.</span></h2>
+        <p>This dashboard learns from past customers and gives every customer a risk score with a clear explanation,
+           so you can see who needs attention first.</p>
+        <div class="welcome-actions">
+          <a class="btn white" href="#/individual">Check a customer →</a>
+          <a class="btn ghost" href="#/segmentation">See risk groups</a>
+        </div>
+      </div>
+      <div class="welcome-art" aria-hidden="true">
+        <div class="mini-card"><span>Risk score</span><b>66%</b><i style="width:66%"></i><small>High risk</small></div>
+        <div class="mini-card two"><span>Low risk</span><b>${pct(lowShare, 0)}</b><small>of customers</small></div>
+      </div>
+    </section>
+
+    <div class="section-head"><h3>How it works</h3></div>
+    <div class="steps">${steps.map(([t, s], i) => `<div class="step"><div class="num">${i + 1}</div>
+      <div><div class="step-title">${esc(t)}</div><div class="step-text">${esc(s)}</div></div></div>`).join("")}</div>
+
+    <div class="section-head"><h3>What you can do here</h3></div>
+    <div class="tools">${tools.map(([key, t, s]) => `<a class="tool" href="#/${key}">
+      <div class="tool-ic">${icon(key)}</div><div class="tool-title">${esc(t)}</div>
+      <div class="tool-text">${esc(s)}</div><div class="tool-go">Open →</div></a>`).join("")}</div>
+
+    <div class="section-head"><h3>Key findings</h3></div>`;
+}
+
+async function pageOverview() {
+  const d = await api(`/api/overview?${tq()}`);
+  page.innerHTML = `
+    ${welcome(d.low_share)}
+    ${inShort(d.summary)}
+    <div class="section-head"><h3>The numbers at a glance</h3></div>
+    ${kpis(d.kpis)}
+    <div class="grid">${chartBox("c-outcome")}${chartBox("c-pay0")}</div>
+    <div class="grid">${chartBox("c-segments")}${chartBox("c-prob")}</div>
+    ${chartBox("c-importance")}
+    ${caption("The longer the bar, the more the model relies on that piece of information. September's payment status matters far more than anything else. This shows what the model uses, not what causes missed payments.")}`;
+  plot("c-outcome", d.charts.outcome); plot("c-pay0", d.charts.pay0);
+  plot("c-segments", d.charts.segments); plot("c-prob", d.charts.probability);
+  plot("c-importance", d.charts.importance);
+}
+
+async function pageExploration() {
+  const d = await api("/api/exploration");
+  const options = d.variables.map((v) => `<option value="${esc(v.value)}">${esc(v.label)}</option>`).join("");
+  page.innerHTML = `
+    ${inShort(d.summary)}
+    ${kpis(d.kpis)}
+    <div class="tabs" id="tabs" role="tablist">
+      <button data-tab="rates" class="active" role="tab">Who missed payments?</button>
+      <button data-tab="compare" role="tab">Paid vs missed: money</button>
+      <button data-tab="dist" role="tab">How values are spread</button>
+      <button data-tab="corr" role="tab" class="tech">Correlation (technical)</button>
+    </div>
+    <section data-panel="rates">
+      ${note("<b>How to read these charts:</b> each bar shows the share of customers in that group who <b>really</b> missed their payment. Longer bar = more missed payments. The dotted line is the average of all customers. Hover over a bar to see how many people it is based on.")}
+      <div class="grid">${chartBox("c-age")}${chartBox("c-limit")}</div>
+      <div class="grid">${chartBox("c-pay0")}${chartBox("c-edu")}</div>
+      <div class="grid">${chartBox("c-mar")}
+        <div class="card pad"><div class="card-title">What "payment status" means</div>
+          <ul><li><b>No bill that month</b>: the customer did not use the card</li>
+              <li><b>Paid in full</b>: paid the whole bill</li>
+              <li><b>Paid the minimum</b>: paid only part, the rest was carried over</li>
+              <li><b>1 – 8 months late</b>: the payment was that many months overdue</li></ul>
+          <p class="caption tech">Data codes: -2 = no bill, -1 = paid in full, 0 = minimum paid, 1–8 = months late.
+             Codes -2 and 0 are not in the original UCI documentation; the meanings above are the widely used
+             interpretation. Education codes 0, 5, 6 and marital code 0 are undocumented and kept as their own groups.</p>
+        </div></div>
+    </section>
+    <section data-panel="compare" hidden>
+      <div class="grid">${chartBox("c-limout")}${chartBox("c-limbox")}</div>
+      <div class="control-row"><label>Show</label>
+        <span class="segmented"><label><input type="radio" name="stat" value="Mean" checked>Average</label>
+        <label><input type="radio" name="stat" value="Median">Typical customer</label></span>
+        <span class="caption">A few customers have huge bills, which pull the average up. "Typical customer" (the median) ignores them.</span></div>
+      <div class="grid">${chartBox("c-bill")}${chartBox("c-paid")}</div>
+    </section>
+    <section data-panel="corr" hidden>
+      ${chartBox("c-corr", 680)}
+      ${caption("Correlation runs from −1 to +1. Red = the two numbers rise together, blue = one rises as the other falls. It does not prove cause and effect.")}
+    </section>
+    <section data-panel="dist" hidden>
+      <div class="control-row"><label for="dist-var">Choose what to look at</label>
+        <select id="dist-var" style="max-width:360px">${options}</select></div>
+      ${chartBox("c-dist")}<div id="dist-caption" class="caption"></div>
+    </section>`;
+
+  const drawn = {};
+  const panels = {
+    rates: () => { plot("c-age", d.charts.age); plot("c-limit", d.charts.limit); plot("c-pay0", d.charts.pay0);
+                   plot("c-edu", d.charts.education); plot("c-mar", d.charts.marriage); },
+    compare: () => { plot("c-limout", d.charts.limit_by_outcome); plot("c-limbox", d.charts.limit_box); loadBillPay("Mean"); },
+    corr: () => plot("c-corr", d.charts.correlation),
+    dist: () => loadDistribution($("#dist-var").value),
+  };
+  // Charts are drawn when their tab is first opened (Plotly needs a visible container to size itself).
+  const open = (tab) => {
+    document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+    document.querySelectorAll("[data-panel]").forEach((p) => p.hidden = p.dataset.panel !== tab);
+    if (!drawn[tab]) { drawn[tab] = true; panels[tab](); }
+  };
+  document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => open(b.dataset.tab));
+  document.querySelectorAll("input[name=stat]").forEach((r) => r.onchange = () => loadBillPay(r.value));
+  $("#dist-var").onchange = (e) => loadDistribution(e.target.value);
+  open("rates");
+
+  async function loadBillPay(stat) {
+    const r = await api(`/api/exploration/bill-payment?stat=${stat}`);
+    plot("c-bill", r.bill); plot("c-paid", r.pay);
+  }
+  async function loadDistribution(v) {
+    const r = await api(`/api/exploration/distribution?var=${encodeURIComponent(v)}`);
+    plot("c-dist", r.chart); $("#dist-caption").textContent = r.caption;
+  }
+}
+
+async function pageSegmentation() {
+  const d = await api(`/api/segmentation?${tq()}`);
+  const SPLIT_NAMES = { Train: "Used for learning", Test: "Used for testing" };
+  const filterBox = (key, label, values, extraClass = "") => `<div class="filter ${extraClass}">
+    <div class="head"><span>${esc(label)}</span><button class="link-btn" data-all="${key}">All / none</button></div>
+    ${values.map((v) => `<label><input type="checkbox" data-filter="${key}" value="${esc(v)}" checked>${
+      v in SEG_COLORS ? `<span class="dot" style="background:${SEG_COLORS[v]}"></span>` : ""}${esc(SPLIT_NAMES[v] || v)}</label>`).join("")}</div>`;
+  page.innerHTML = `
+    ${inShort(d.summary_text)}
+    ${kpis(d.cards, 3)}
+    <div class="grid">${chartBox("c-hist")}
+      <div class="card pad"><div class="card-title">Estimate vs reality in each group ${info("If the model's average estimate is close to the share who really missed, its percentages can be trusted.")}</div>
+        <div id="t-summary"></div>
+        ${caption(`Current levels: Low below ${thresholds.medium}%, Medium ${thresholds.medium}–${thresholds.high}%, High ${thresholds.high}% and above. Change them in the sidebar.`)}
+      </div></div>
+    <h3>Find customers</h3>
+    <p class="intro">Untick boxes to narrow down the list. The table shows the customers with the highest estimated chance first.</p>
+    <div class="filters" style="margin-top:12px">
+      ${filterBox("segment", "Risk group", d.filters.segment)}${filterBox("age", "Age", d.filters.age)}
+      ${filterBox("limit", "Credit limit", d.filters.limit)}
+      ${filterBox("split", "Learning or testing", d.filters.split, "tech")}
+      ${d.filters.source.length > 1 ? filterBox("source", "Data file", d.filters.source, "tech") : ""}
+    </div>
+    <div class="control-row"><label for="top-n">Show the top</label>
+      <input type="range" id="top-n" min="10" max="200" step="5" value="25"><b id="top-n-val">25</b>
+      <span class="muted">riskiest customers</span></div>
+    <div id="seg-count" class="caption"></div>
+    <div class="card pad"><div id="t-top">${loading()}</div></div>
+    <div class="btn-row">
+      <a class="btn primary" id="dl-seg" href="#">⬇ Download this list (Excel-friendly CSV)</a>
+      <button class="btn tech" id="save-seg">Save all predictions to outputs/</button>
+    </div>
+    <div id="save-msg" class="caption"></div>`;
+  plot("c-hist", d.histogram);
+  renderTable("t-summary", d.summary);
+
+  const query = () => {
+    const parts = [tq(), `top=${$("#top-n").value}`];
+    for (const key of ["segment", "age", "limit", "split", "source"]) {
+      const boxes = document.querySelectorAll(`[data-filter=${key}]`);
+      if (!boxes.length) continue;  // e.g. no source filter when there is only one data file
+      const vals = [...boxes].filter((c) => c.checked).map((c) => c.value);
+      // File names can contain commas, so source values are separated with "|".
+      parts.push(`${key}=${encodeURIComponent(vals.join(key === "source" ? "|" : ","))}`);
+    }
+    return parts.join("&");
+  };
+  let timer;
+  const refresh = () => {
+    $("#top-n-val").textContent = $("#top-n").value;
+    $("#dl-seg").href = `/api/segmentation/export.csv?${query()}`;
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        const r = await api(`/api/segmentation/customers?${query()}`);
+        $("#seg-count").textContent = `${fmtInt(r.count)} of ${fmtInt(r.total)} customers match your choices. Click a column heading to sort.`;
+        if (!r.count) { $("#t-top").innerHTML = '<div class="alert info">No customers match. Tick at least one box in each group.</div>'; return; }
+        renderTable("t-top", r.table, 25);
+      } catch (e) { $("#t-top").innerHTML = `<div class="alert error">${esc(e.message)}</div>`; }
+    }, 200);
+  };
+  document.querySelectorAll("[data-filter]").forEach((c) => c.onchange = refresh);
+  document.querySelectorAll("[data-all]").forEach((b) => b.onclick = () => {
+    const boxes = [...document.querySelectorAll(`[data-filter=${b.dataset.all}]`)];
+    const target = !boxes.every((c) => c.checked);
+    boxes.forEach((c) => c.checked = target);
+    refresh();
+  });
+  $("#top-n").oninput = refresh;
+  $("#save-seg").onclick = async () => {
+    try {
+      const r = await post("/api/segmentation/save", { medium: thresholds.medium, high: thresholds.high });
+      $("#save-msg").textContent = "✓ Saved: " + r.saved.join(", ");
+    } catch (e) { $("#save-msg").textContent = e.message; }
+  };
+  refresh();
+}
+
+function gauge(p) {
+  const m = thresholds.medium, h = thresholds.high, x = Math.min(99.5, Math.max(0.5, p * 100));
+  return `<div class="gauge" aria-label="Probability ${pct(p)} on a 0 to 100% risk scale">
+    <div class="track"><div style="width:${m}%;background:${SEG_COLORS["Low risk"]}"></div>
+      <div style="width:${h - m}%;background:${SEG_COLORS["Medium risk"]}"></div>
+      <div style="width:${100 - h}%;background:${SEG_COLORS["High risk"]}"></div></div>
+    <div class="marker" style="left:${x}%" data-label="${pct(p, 0)}"></div>
+    <div class="scale"><span style="left:0">0%</span><span style="left:${m}%">${m}%</span>
+      <span style="left:${h}%">${h}%</span><span style="left:100%">100%</span></div></div>`;
+}
+
+function resultHtml(r) {
+  const s = r.summary;
+  const list = (items) => `<ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>`;
+  let html = `
+    <div class="card-title">Chance of missing next month's payment ${info("The model's estimate, based on everything it knows about this customer. An estimate, not a guarantee.")}</div>
+    <div class="result-head"><span class="big-number">${pct(r.probability, 0)}</span>
+      <span class="seg-pill"><span class="dot" style="background:${SEG_COLORS[r.segment]}"></span>${esc(r.segment)}</span></div>
+    ${gauge(r.probability)}
+    <div class="in-short"><div class="label">In plain words</div>
+      <p style="margin:6px 0">${esc(r.headline)} ${esc(r.compare)}</p>
+      ${s.up.length ? `<div><b style="color:#E8364F">What makes this customer look riskier:</b>${list(s.up)}</div>` : ""}
+      ${s.down.length ? `<div><b style="color:#2D60FF">What makes them look safer:</b>${list(s.down)}</div>` : ""}
+    </div>`;
+  html += `<div class="card tech"><div id="c-explain" style="min-height:340px"></div></div>
+    <div class="caption tech">Red bars push the chance up, blue bars push it down, compared with a typical customer.
+      This shows how the model thinks, not proof of what causes missed payments.</div>`;
+  return html;
+}
+
+async function pageIndividual() {
+  page.innerHTML = `
+    <div class="control-row">
+      <span class="segmented" role="radiogroup">
+        <label><input type="radio" name="mode" value="existing" checked>Look up a customer</label>
+        <label><input type="radio" name="mode" value="new">Try a new customer</label></span></div>
+    <section id="mode-existing">
+      <div class="control-row id-search"><label for="cust-id">Customer number</label>
+        <button class="btn small" id="prev-id" title="Previous customer">‹</button>
+        <input type="number" id="cust-id" value="1" min="1" step="1">
+        <button class="btn small" id="next-id" title="Next customer">›</button>
+        <button class="btn primary" id="lookup">Show</button>
+        <span class="muted">Type a number and press Enter, or use ‹ › to browse.</span></div>
+      <div id="existing-result"></div>
+    </section>
+    <section id="mode-new" hidden>
+      <form id="new-form" class="card pad" novalidate>${loading("Loading form…")}</form>
+      <div id="new-result"></div>
+    </section>`;
+
+  document.querySelectorAll("input[name=mode]").forEach((r) => r.onchange = () => {
+    const mode = document.querySelector("input[name=mode]:checked").value;
+    $("#mode-existing").hidden = mode !== "existing";
+    $("#mode-new").hidden = mode !== "new";
+  });
+
+  const lookup = async () => {
+    const box = $("#existing-result");
+    box.innerHTML = loading("Looking up the customer…");
+    try {
+      const r = await api(`/api/customer?id=${encodeURIComponent($("#cust-id").value)}&${tq()}`);
+      box.innerHTML = `<div class="grid" style="align-items:start">
+        <div class="card pad"><div class="card-title">Customer ${r.id}: what we know</div><div id="t-details"></div></div>
+        <div class="card pad">${resultHtml(r)}</div></div>`;
+      renderTable("t-details", { columns: ["Information", "Value"], rows: r.details, formats: {} }, 25);
+      plot("c-explain", r.explanation_chart);
+    } catch (e) { box.innerHTML = `<div class="alert warn">${esc(e.message)}</div>`; }
+  };
+  const step = (n) => { const el = $("#cust-id"); el.value = Math.max(1, (+el.value || 1) + n); lookup(); };
+  $("#lookup").onclick = lookup;
+  $("#prev-id").onclick = () => step(-1);
+  $("#next-id").onclick = () => step(1);
+  $("#cust-id").onkeydown = (e) => { if (e.key === "Enter") lookup(); };
+  lookup();
+
+  // Build the new-customer form from the server's field list.
+  const f = await api("/api/form-defaults");
+  const field = (x) => {
+    const input = x.type === "select"
+      ? `<select name="${x.name}">${x.options.map((o) => `<option value="${o.value}" ${o.value === x.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`
+      : `<input type="number" name="${x.name}" value="${x.value}" min="${x.min}" max="${x.max}" step="${x.step}">`;
+    return `<div class="field"><label>${esc(x.label)}</label>${input}</div>`;
+  };
+  $("#new-form").innerHTML = `
+    ${note("The form is already filled in with a <b>typical customer</b>. Change only what you know, then press the button at the bottom.")}
+    <div class="form-section">1. About the customer</div>
+    <div class="form-row">${f.profile.map(field).join("")}</div>
+    <div class="form-section">2. The last six months <span class="muted">(most recent month first)</span></div>
+    ${f.months.map((row) => `<div class="form-row month">${row.map(field).join("")}</div>`).join("")}
+    <div class="btn-row"><button class="btn primary" type="submit">Show the chance of a missed payment</button>
+      <button class="btn" type="reset">Back to a typical customer</button></div>`;
+  $("#new-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const values = Object.fromEntries(new FormData(e.target).entries());
+    const box = $("#new-result");
+    box.innerHTML = loading("Working it out…");
+    try {
+      const r = await post("/api/predict", { values, medium: thresholds.medium, high: thresholds.high });
+      box.innerHTML = `<div class="card pad" style="margin-top:16px">${resultHtml(r)}</div>`;
+      plot("c-explain", r.explanation_chart);
+      box.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      const items = err.message.replace("Please fix the following: ", "").split(" | ");
+      box.innerHTML = `<div class="alert error"><b>Please fix the following:</b><ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></div>`;
+    }
+  };
+}
+
+async function pagePerformance() {
+  const d = await api("/api/performance");
+  const c = d.calibration;
+  page.innerHTML = `
+    ${inShort(d.plain)}
+    ${kpis(d.kpis, 5)}
+    <details class="card pad" style="margin-bottom:16px"><summary>What do these five numbers mean?</summary>
+      <ul>${d.help.map((h) => `<li><b>${esc(h.name)}</b>: ${esc(h.text)}</li>`).join("")}</ul>
+    </details>
+    <div class="grid">${chartBox("c-cm")}
+      <div class="card pad"><div class="card-title">How to read the four boxes</div>
+        <ul><li><b>Correctly warned</b>: the model warned, and the customer really missed a payment.</li>
+            <li><b>Missed (no warning)</b>: the customer missed a payment, but the model did not warn. This is the costly mistake.</li>
+            <li><b>False alarm</b>: the model warned, but the customer paid.</li>
+            <li><b>Correctly said "will pay"</b>: no warning, and the customer paid.</li></ul>
+        ${caption(`The model warns when the estimated chance is ${pct(d.decision_threshold, 0)} or more. You can change this below.`)}
+        <div class="tech" style="margin-top:12px"><div class="card-title">Classification report (technical)</div><div id="t-report"></div></div>
+      </div></div>
+    ${d.by_source.rows.length > 1 ? `<div class="card pad tech" style="margin-bottom:16px">
+      <div class="card-title">Results by data file</div><div id="t-sources"></div>
+      ${caption("Each file is split the same way (4 in 5 for learning, 1 in 5 for testing). Results for a small file rest on very few customers and can change a lot by chance.")}</div>` : ""}
+    <div class="grid tech">${chartBox("c-roc")}${chartBox("c-pr")}</div>
+
+    <h3>How cautious should the warnings be?</h3>
+    <p class="intro">Move the slider. A <b>lower</b> level warns about more customers: you catch more of the people who
+      will miss a payment, but you also get more false alarms. A <b>higher</b> level gives fewer, surer warnings.</p>
+    <div class="control-row"><label for="perf-t">Warn when the estimated chance is at least</label>
+      <input type="range" id="perf-t" min="0.05" max="0.95" step="0.05" value="0.5"><b id="perf-t-val" style="font-family:var(--serif);font-size:1.2rem">50%</b></div>
+    <div id="t-cards"></div><div id="t-caption" class="in-short" style="font-size:.95rem"></div>
+
+    <h3>Can you trust the percentages?</h3>
+    <div class="grid">${chartBox("c-cal")}
+      <div class="card pad"><div class="card-title">Check: estimate vs reality ${info("If the model says 40% for a group of customers, about 40 in 100 of them should really miss a payment.")}</div><ul>
+        <li>The model's average estimate: <b>${pct(c.mean_predicted)}</b></li>
+        <li>Customers who really missed: <b>${pct(c.actual)}</b></li>
+        <li class="tech">Brier score: <b>${c.brier.toFixed(3)}</b> <span class="muted">(error of the probabilities; lower is better)</span></li></ul>
+        <div class="alert ${c.message.level}">${esc(c.message.text)}</div>
+        ${caption("Each dot on the chart is a group of customers. Dots close to the dashed line mean the estimates came true.")}
+      </div></div>
+
+    <h3>What does the model pay attention to?</h3>
+    <div class="grid">${chartBox("c-imp")}<div class="tech">${chartBox("c-coef")}</div>
+      <div class="card pad simple-only"><ul>
+        <li><b>Recent payment behaviour matters most</b>, especially whether the customer paid late in September.</li>
+        <li>The <b>credit limit</b> and recent <b>payment amounts</b> also matter, but much less.</li>
+        <li>This shows what the model <b>uses</b>, not what <b>causes</b> people to miss payments.</li>
+        <li><b>Fairness:</b> the data includes gender, age, education and marital status. A real lender would need legal
+          and fairness checks before using such information.</li></ul></div></div>
+    <div class="card pad tech"><ul>
+      <li><b>Model weights</b> (coefficients): red raises risk, blue lowers it. Numeric inputs are standardised, so a
+        weight is the change in log-odds for a one-standard-deviation increase. Odds ratio = e^weight.</li>
+      <li><b>Importance</b> (permutation importance): how much ranking quality drops when one input is shuffled on
+        test data.</li>
+      <li><b>Limitations</b>: related inputs (e.g. the six bill amounts) can share or swap weight, and rare categories
+        can get large weights from very few customers, so read single weights with care.</li>
+      <li><b>Fairness</b>: gender, age, education and marital status are demographic attributes. Using them (or
+        proxies) in real lending can be unlawful or discriminatory.</li></ul></div>
+    ${techNote("technical charts, the classification report and model weights")}
+    <div class="btn-row">
+      <a class="btn primary" href="/api/download/test_predictions.csv?${tq()}">⬇ Download: estimate vs reality for the test customers</a>
+      <a class="btn tech" href="/api/download/metrics.json">⬇ Model metrics (JSON)</a>
+    </div>`;
+  plot("c-cm", d.charts.confusion); plot("c-roc", d.charts.roc); plot("c-pr", d.charts.pr);
+  plot("c-cal", d.charts.calibration); plot("c-coef", d.charts.coefficients); plot("c-imp", d.charts.importance);
+  renderTable("t-report", d.report);
+  if (d.by_source.rows.length > 1) renderTable("t-sources", d.by_source);
+
+  let timer;
+  const update = () => {
+    const t = (+$("#perf-t").value).toFixed(2);
+    $("#perf-t-val").textContent = Math.round(t * 100) + "%";
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const r = await api(`/api/performance/threshold?t=${t}`);
+      $("#t-cards").innerHTML = kpis(r.cards, 4, false);
+      const cm = r.confusion, real = cm.tp + cm.fn;
+      $("#t-caption").innerHTML = `<div class="label">At this level</div>
+        Of the <b>${fmtInt(real)}</b> test customers who really missed a payment, the model would warn about
+        <b>${fmtInt(cm.tp)}</b> and miss <b>${fmtInt(cm.fn)}</b>. It would also raise <b>${fmtInt(cm.fp)}</b> false
+        alarms about customers who paid. Which mistake costs more is a business decision.`;
+    }, 150);
+  };
+  $("#perf-t").oninput = update;
+  update();
+}
+
+async function pageQuality() {
+  const d = await api("/api/quality");
+  page.innerHTML = `
+    ${inShort(d.summary)}
+    ${kpis(d.kpis)}
+    ${note(`<b>Where the data comes from:</b> real credit-card customers of a bank in Taiwan (April–September 2005,
+      published by the UCI Machine Learning Repository), plus any extra data files you added. For each customer we
+      know their credit limit, some personal details, how they paid each month, their bills, and whether they missed
+      the following payment. The original files are only read, never changed.`)}
+    <div class="card pad" style="margin-bottom:16px"><div class="card-title">Data files used</div><div id="t-sources"></div></div>
+    <div class="grid tech" style="align-items:start">
+      <div class="card pad"><div class="card-title">Columns, types and missing values</div><div id="t-cols"></div></div>
+      <div class="card pad"><div class="card-title">Outcome distribution</div><div id="t-target"></div>
+        <div class="card-title" style="margin-top:18px">Unusual numeric values</div><div id="t-unusual" class="wrap"></div></div>
+    </div>
+    <div class="card pad tech"><div class="card-title">Undocumented or special category codes <span class="muted">(kept, not deleted)</span></div>
+      <div id="t-codes" class="wrap"></div></div>
+    <div class="card pad tech" style="margin-top:16px"><div class="card-title">Summary statistics (numeric variables)</div>
+      <div id="t-desc"></div></div>
+    ${techNote("column-by-column checks, unusual codes and summary statistics")}
+    <div class="btn-row"><a class="btn primary" href="/api/download/data_quality.csv">⬇ Download the data check report (CSV)</a></div>`;
+  renderTable("t-sources", d.sources);
+  renderTable("t-cols", d.columns, 25); renderTable("t-target", d.target); renderTable("t-unusual", d.unusual);
+  renderTable("t-codes", d.codes, 40); renderTable("t-desc", d.describe, 20);
+}
+
+// ---------------------------------------------------------------------------
+// Router: #/overview, #/exploration, ...
+// ---------------------------------------------------------------------------
+const RENDERERS = { overview: pageOverview, exploration: pageExploration, segmentation: pageSegmentation,
+                    individual: pageIndividual, performance: pagePerformance, quality: pageQuality };
+const currentPage = () => { const p = location.hash.replace("#/", ""); return p in PAGES ? p : "overview"; };
+
+async function route() {
+  const p = currentPage(), meta = PAGES[p];
+  renderNav(p);
+  $("#page-title").textContent = meta.name;
+  $("#page-intro").textContent = meta.intro;
+  document.title = `${meta.name} · Credit Risk Analytics`;
+  document.body.classList.remove("menu-open");
+  page.innerHTML = loading();
+  try {
+    await RENDERERS[p]();
+  } catch (e) {
+    page.innerHTML = `<div class="alert error"><b>Something went wrong.</b> ${esc(e.message)}</div>`;
+  }
+}
+
+function setView(view) {
+  document.body.classList.toggle("simple", view === "simple");
+  $("#view-simple").classList.toggle("on", view === "simple");
+  $("#view-detail").classList.toggle("on", view !== "simple");
+  try { localStorage.setItem("view", view); } catch (e) { /* ignore */ }
+  // Charts that were hidden have no size yet; ask Plotly to fit them now that they are visible.
+  document.querySelectorAll(".js-plotly-plot").forEach((el) => { if (el.offsetParent) Plotly.Plots.resize(el); });
+}
+
+function setupChrome() {
+  let view = "simple";
+  try { view = localStorage.getItem("view") || "simple"; } catch (e) { /* ignore */ }
+  setView(view);
+  $("#view-simple").onclick = () => setView("simple");
+  $("#view-detail").onclick = () => setView("detail");
+  $("#menu-btn").onclick = () => document.body.classList.toggle("menu-open");
+  $("#print-btn").onclick = () => window.print();
+  $("#glossary").innerHTML = GLOSSARY.map(([t, d]) => `<dt>${esc(t)}</dt><dd>${esc(d)}</dd>`).join("");
+  $("#help-btn").onclick = () => $("#help").showModal();
+  $("#help-close").onclick = () => $("#help").close();
+  $("#help").onclick = (e) => { if (e.target.id === "help") $("#help").close(); };  // click outside to close
+}
+
+async function start() {
+  setupChrome();
+  renderNav(currentPage());
+  if (typeof Plotly === "undefined") {
+    page.innerHTML = '<div class="alert error">Plotly.js could not be loaded from the server. Is the plotly package installed?</div>';
+    return;
+  }
+  page.innerHTML = loading("Loading the data…");
+  const status = await api("/api/status").catch((e) => ({ ok: false, error: e.message }));
+  if (!status.ok) {
+    $("#page-title").textContent = "Setup problem";
+    page.innerHTML = `<div class="alert error"><b>The dashboard could not start.</b> ${esc(status.error)}</div>
+      ${note("Place the UCI 'Default of Credit Card Clients' file (.xls, .xlsx or .csv) in the project folder and restart the server. No synthetic data is generated.")}`;
+    return;
+  }
+  const ds = status.dataset;
+  DATASET = ds;
+  $("#data-label").textContent = `${fmtInt(ds.rows)} customers · ${ds.files.length} data file${ds.files.length > 1 ? "s" : ""}`;
+  showModelInfo(status);
+  setupThresholds();
+  window.addEventListener("hashchange", route);
+  route();
+}
+start();
+</script>
+</body>
+</html>
