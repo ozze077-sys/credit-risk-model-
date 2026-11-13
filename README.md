@@ -7,6 +7,33 @@ groups customers into risk segments, and explains the results.
 
 Everything runs locally. No Power BI, cloud services or API keys.
 
+**Live online version:** https://ozze077-sys.github.io/credit-risk-model-/
+
+---
+
+## Online version (GitHub Pages)
+
+GitHub Pages can only host static files, so it cannot run `server.py`. Instead,
+`build_static_site.py` writes one self-contained `index.html` at the project root:
+
+- the same page as `web/index.html` (same look, pages and charts);
+- the customer table, the model's coefficients and every fixed chart, computed by `server.py`'s own functions and embedded as JSON;
+- `web/static_api.js`, which answers the page's `/api/...` requests **in the browser** with the same formulas,
+  so the threshold sliders, filters, customer lookup, new-customer estimates, warning-level slider and CSV downloads all still work.
+
+Retraining and "Save all predictions to outputs/" need Python, so they are hidden online.
+
+**To rebuild and publish** after the data or model changes:
+
+```powershell
+python build_static_site.py     # writes index.html
+git add index.html
+git commit -m "Rebuild online dashboard"
+git push                        # .github/workflows/pages.yml deploys it automatically
+```
+
+One-time setup: in the GitHub repo, **Settings → Pages → Source** must be set to **GitHub Actions**.
+
 ---
 
 ## 1. Quick start (Windows PowerShell, inside VS Code)
